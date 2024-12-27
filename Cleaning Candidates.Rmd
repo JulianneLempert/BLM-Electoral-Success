@@ -830,7 +830,7 @@ doi:10.32614/CRAN.package.wru.
 Note: Insert your own unique census API key into the quotes below.
 
 ```{r}
-Sys.setenv(CENSUS_API_KEY = "d751138a4df18e65bb578d33e8d239b171dbda5d")
+Sys.setenv(CENSUS_API_KEY = "")
 ```
 
 ```{r}
