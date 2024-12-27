@@ -5,11 +5,10 @@ The uploaded RMDs contain the R code I used to clean and analyze protest and ele
 The project will be completed by March 2025, with the possibility for expansion later on.
 
 The next stages of the project include:
-- Gathering 2022 Senate data for electoral trends
 - Analyzing primary elections
 - Analyzing governor elections
-- Examining national mood, margin of victory, party, and gender as variables
-- Fine-tuning geographic matches for BISG to avoid dropped observations and inaccuracies
+- Examining the effect of political party on outcomes
+- Fine-tuning geographic matches for protest data and BISG
 - Adjust for redistricting (currently, all House districts are computed using the 116th Congress)
-- Conduct more manual race collection for improved accuracy
-- Use other statistical modeling techniques besides logistic regression
+- More manual race collection
+- Other statistical modeling techniques besides logistic regression
