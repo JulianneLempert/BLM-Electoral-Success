@@ -494,8 +494,7 @@ house_generals <- house_generals %>%
     & suffix == "YIM" ~ "YIM",
     first_name == "KAREN" & middle_name == "FREE" & last_name == "SPIRIT" 
     & suffix == "TALLEY-LANE" ~ "TALLEY-LANE",
-    TRUE ~ last_name  # Keep existing values for all other rows
-  )) %>%
+    TRUE ~ last_name)) %>% # Keep existing values for all other rows
   mutate(middle_name = case_when(
       first_name == "DIANE" & middle_name == "E" & last_name == "BUSH" ~ "MITSCH",
       first_name == "JAMES" & middle_name == "E" & last_name == "CLYBURN" ~ "ENOS",
@@ -508,15 +507,13 @@ house_generals <- house_generals %>%
       first_name == "NAN" & middle_name == "A" & last_name == "HAYWORTH" ~ "AS",
       first_name == "ROSEANN" & middle_name == "L" & last_name == "WOFFORD" ~ "EHRHARD",
       first_name == "SEAN" & middle_name == "D" & last_name == "MIELAT" ~ "DM",
-      TRUE ~ middle_name  # Keep existing values for all other rows
-    )) %>%
+      TRUE ~ middle_name)) %>%  # Keep existing values for all other rows
   mutate(first_name = case_when(
     first_name == "C" & middle_name == "WILLIAM" & last_name == "YOUNG" ~ "CHARLES",
     first_name == "C" & last_name == "RUPPERSBERGER" ~ "DUTCH",
     first_name == "M" & middle_name == "E" & last_name == "MCCULLOUGH" ~ "MAC",
-    TRUE ~ first_name  # Keep existing values for all other rows
-  ))
-
+    TRUE ~ first_name))  # Keep existing values for all other rows
+  
 # Set all suffix values to NA
 house_generals$suffix <- NA
 
@@ -540,8 +537,7 @@ house_generals <- house_generals %>%
       first_name == "MONICA" & middle_name == "DE" & last_name == "DE LA CRUZ" ~ NA,
       first_name == "RICARDO" & middle_name == "DE" & last_name == "DE LA FUENTE" ~ NA,
       first_name == "GEORGE" & middle_name == "A" & last_name == "SANTOS" ~ NA,
-      TRUE ~ middle_name  # Keep existing values for all other rows
-    ))
+      TRUE ~ middle_name))  # Keep existing values for all other rows
 ```
 
 ```{r}
@@ -900,7 +896,6 @@ Note: to complete merge, obtain hun_six dataset and code from Cleaning Protests.
 
 ```{r}
 # Combine datasets into comprehensive matching dataset
-# Note: 1213 non matches
 
 hun_six <- hun_six %>%
   rename(county_name = county,
@@ -1123,8 +1118,6 @@ white_candidates <- senate_protest_2020 %>%
 model <- glm(success ~ chemical_agents + white_success_rate, data = white_candidates, family = binomial)
 summary(model)
 ```
-
-no results for black or white candidates
 
 ## House of Representatives BISG and Analysis
 
@@ -1757,13 +1750,6 @@ house_BISG <- house_BISG %>%
 ```
 
 ```{r}
-house_protest_2020 %>%
-  filter(black_success_rate == 1)
-```
-house_BISG %>% filter(race == "black" & party == "REPUBLICAN")
-Black republican house candidates checked 
-
-```{r}
 house_2020 <- house_BISG %>%
   # Filter to 2020 House races
   filter(year == 2020)
@@ -1806,8 +1792,6 @@ white_candidates <- house_protest_2020 %>%
 model <- glm(success ~ size + black_success_rate, data = black_candidates, family = binomial)
 summary(model)
 ```
-
-nothing for Black candidates or white candidates
 
 
 ## State Legislatures BISG and analysis
@@ -1947,22 +1931,10 @@ model <- glm(success ~ frequency + black_success_rate, data = black_candidates, 
 summary(model)
 ```
 
-note that this is just for general candidates
-
-black candidates
-- police injuries almost sig (+)
-- property damage almost sig (+)
-- chemical agents almost sig (+)
-
-note that all of the above denote severity
-
-white candidates
-- size almost sig (+)
-
 
 ## Local Office Analysis
 
-Note that race is included in the locals dataset, so no BISG needed.
+Note that race is included in the locals dataset, so no BISG is needed.
 
 ```{r}
 county_2020 <- county_fips %>%
@@ -2048,8 +2020,5 @@ white_candidates <- locals_protests %>%
 model <- glm(success ~ chemical_agents + black_success_rate, data = black_candidates, family = binomial)
 summary(model)
 ```
-
-1 star for injuries police (-) for white candidates
-almost sig for size (-) for white candidates
 
 
