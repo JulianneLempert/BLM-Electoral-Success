@@ -6,7 +6,6 @@ The project will be completed by March 2025, with the possibility for expansion 
 
 The next stages of the project include:
 - Analyzing primary elections
-- Analyzing governor elections
 - Examining the effect of political party on outcomes
 - Fine-tuning geographic matches for protest data and BISG
 - Adjust for redistricting (currently, all House districts are computed using the 116th Congress)
