@@ -1,0 +1,2595 @@
+---
+title: "Cleaning Candidates"
+author: "Julianne Lempert"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r, message=FALSE}
+# Load libraries
+library(tidyverse)
+library(knitr)
+library(wru)
+```
+
+## BISG
+
+wru package citation:
+Khanna, Kabir, Brandon Bertelsen, Santiago Olivella, Evan Rosenman, Alexander Rossell
+Hayes, and Kosuke Imai. 2015. “Wru: Who Are You? Bayesian Prediction of Racial
+Category Using Surname, First Name, Middle Name, and Geolocation.” 
+doi:10.32614/CRAN.package.wru.
+
+Note: Insert your own unique census API key into the quotes below.
+
+```{r Census API}
+Sys.setenv(CENSUS_API_KEY = "d751138a4df18e65bb578d33e8d239b171dbda5d")
+```
+
+```{r Scrape Census Data}
+# Scrape census data
+census.data <- get_census_data(
+  # Personal API key from US Census Bureau
+  key = Sys.getenv("CENSUS_API_KEY"),
+  # Collect for all states
+  states = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", 
+  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
+  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
+  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
+  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"),
+  # Don't include age or sex
+  age = FALSE,
+  sex = FALSE,
+  # Use 2010 census
+  year = "2010",
+  # Pull data by county
+  census.geo = c("county"),
+  # Number of times to reboot if network error
+  retry = 1)
+```
+
+Dataset citation:
+MDR Education, https://mdreducation.com/pdfs/US_FIPS_Codes.xls.
+
+```{r Load Fips Data}
+# Read in data
+fips_match <- read.csv("Fips Match Sheet - Sheet1.csv")
+```
+
+```{r Organize Fips}
+fips_match <- fips_match %>%
+  # Rename variables
+  rename(county_name = County.Name,
+         state_fips = FIPS.State,
+         county_fips = FIPS.County,
+         state_name = State) %>%
+  # Set to lowercase
+  mutate(county_name = tolower(county_name))
+
+# Create named vector to reassign spelled-out states to abbreviations
+state_mapping <- c(
+  "Alabama" = "AL", "Alaska" = "AK", "Arizona" = "AZ", "Arkansas" = "AR",
+  "California" = "CA", "Colorado" = "CO", "Connecticut" = "CT", "Delaware" = "DE",
+  "Florida" = "FL", "Georgia" = "GA", "Hawaii" = "HI", "Idaho" = "ID",
+  "Illinois" = "IL", "Indiana" = "IN", "Iowa" = "IA", "Kansas" = "KS",
+  "Kentucky" = "KY", "Louisiana" = "LA", "Maine" = "ME", "Maryland" = "MD",
+  "Massachusetts" = "MA", "Michigan" = "MI", "Minnesota" = "MN", "Mississippi" = "MS",
+  "Missouri" = "MO", "Montana" = "MT", "Nebraska" = "NE", "Nevada" = "NV",
+  "New Hampshire" = "NH", "New Jersey" = "NJ", "New Mexico" = "NM", "New York" = "NY",
+  "North Carolina" = "NC", "North Dakota" = "ND", "Ohio" = "OH", "Oklahoma" = "OK",
+  "Oregon" = "OR", "Pennsylvania" = "PA", "Rhode Island" = "RI", "South Carolina" = "SC",
+  "South Dakota" = "SD", "Tennessee" = "TN", "Texas" = "TX", "Utah" = "UT",
+  "Vermont" = "VT", "Virginia" = "VA", "Washington" = "WA", "West Virginia" = "WV",
+  "Wisconsin" = "WI", "Wyoming" = "WY")
+
+fips_match <- fips_match %>%
+  # Index at new state name
+   mutate(state_name = state_mapping[state_name])
+```
+
+Note: to complete merge, obtain hun_six dataset and code from Cleaning Protests.rmd file.
+
+```{r Full Match Creation}
+# Combine datasets into comprehensive matching dataset
+# Note: 1213 non matches
+
+hun_six <- hun_six %>%
+  rename(county_name = county,
+         state_name = state)
+
+full_match <- left_join(fips_match, hun_six, by = c("county_name", "state_name"))
+
+full_match <- full_match %>%
+  # Remove unnecessary variables
+  select(-c(state_fips, county_name)) %>%
+  # Rename variable
+  rename(state = state_name)
+```
+
+## Cleaning Local Office Candidates
+
+Dataset citation:
+De Benedictis-Kessner, Justin, Diana Lee, Yamil Velez, and Christopher Warshaw. 2023. 
+“American Local Government Elections Database.” doi: 10.17605/OSF.IO/MV5E6.
+
+```{r Load Locals}
+# Read in local office data
+locals <- read.csv("locals.csv")
+```
+
+```{r Organize Locals}
+locals <- locals %>%
+  # Subset to relevant years
+  filter(year >= 2010) %>%
+  mutate(race_est = case_when(
+    # Race is included in this dataset
+    # Set race options to Black, white, or other
+    race_est %in% c("asian", "other", "hispanic") ~ "other",
+    race_est == "caucasian" ~ "white",
+    TRUE ~ race_est)) %>%
+  # Get rid of irrelevant columns
+ select(-c(votes, vote_share, contributor.cfscore, bonica.cid, prob_democrat, prob_republican, prob_female, prob_male, prob_black, prob_white, prob_hispanic, prob_asian, prob_other, ballotpedia_url)) %>%
+  # Rename variables
+ rename(office = office_consolidated, gender = gender_est,race = race_est, party = pid_est, location = geo_name, last_name = lastname, first_name = firstname, cand_id = ledb_candid, state = state_abb) %>%
+  # Fix duplicate naming of states
+  mutate(state = case_when(
+    state == "Maryland" ~ "MD",
+    state == "Utah" ~ "UT",
+    TRUE ~ state)) %>%
+  # Remove unnamed candidate
+  filter(first_name != "scattering")
+```
+
+```{r 2020 Race Cleaning}
+# Manual race cleaning needed for 2020, unorganized by couunty/town; the other changes are addressed later
+locals <- locals %>%
+  mutate(race = case_when(
+    full_name == "herb cranford" ~ "white",
+    full_name == "jody wagner" ~ "white",
+    full_name == "jared t williams" ~ "black",
+    full_name == "natalie paine" ~ "white",
+    full_name == "mark p jones" ~ "white",
+    full_name == "anita reynolds howard" ~ "black",
+    full_name == "chris a arnt" ~ "white",
+    full_name == "t wright barksdale" ~ "white",
+    full_name == "rosemary m greene" ~ "white",
+    full_name == "randy mcginley" ~ "white",
+    full_name == "daphne jarriel totten" ~ "white",
+    full_name == "bob wallace" ~ "black",
+    full_name == "keith higgins" ~ "white",
+    full_name == "b alison sosebee" ~ "white",
+    full_name == "destiny bryant" ~ "black",
+    full_name == "george r christian" ~ "white",
+    full_name == "deborah gonzalez" ~ "hispanic",
+    full_name == "tripp fitzner" ~ "white",
+    full_name == "lewis r lamb" ~ "white",
+    full_name == "jonathan l adams" ~ "white",
+    full_name == "bryce a johnson" ~ "white",
+    full_name == "james chafin" ~ "white",
+    full_name == "timothy g vaughn" ~ "white",
+    full_name == "bill doupe" ~ "white",
+    full_name == "shannon wright" ~ "black",
+    full_name == "adriane latrell love" ~ "black",
+    full_name == "brian patterson" ~ "white",
+    full_name == "ty walker" ~ "black",
+    full_name == "ricco wright" ~ "black",
+    full_name == "zackri leon whitlow" ~ "white",
+    TRUE ~ race))
+```
+
+```{r Clean Location Locals}
+locals <- locals %>%
+  # Turn text in fips to lowercase
+  mutate(fips = tolower(fips)) %>%
+  # Fips text explicitly mentioning county
+  mutate(location = case_when(
+    fips == "mo-st. louis county" ~ "st. louis",
+    fips == "md-baltimore county" ~ "baltimore",
+    fips == "tx-kenedy & kleberg counties" ~ "kleberg",
+    TRUE ~ location)) %>%
+  # Provide fips for counties with just text
+   mutate(fips = case_when(
+    fips == "mo-st. louis county" ~ "29189",
+    fips == "md-baltimore county" ~ "24005",
+    fips == "tx-kenedy & kleberg counties" ~ "48273",
+    TRUE ~ fips)) %>%
+  # Create a fips_type variable
+  mutate(fips_type = case_when(
+     grepl("-", fips) ~ "other",
+    # 5-digit fips or location names with county denote county, except if there's a dash
+      nchar(fips) == 5 ~ "county",  
+    # 7-digit fips denotes place, except if there's dash
+      nchar(fips) == 7 ~ "place",
+      TRUE ~ "other")) %>%
+  # Remove white space
+  mutate(location = str_trim(location)) %>%
+  # Set to lowercase
+  mutate(location = tolower(location)) %>%
+  # Remove county label
+  mutate(location = gsub("county", "", location))
+
+# Manual location fixes
+locals <- locals %>%
+  mutate(location = case_when(
+    fips == "mo-st. louis city" ~ "st. louis",
+    fips == "md-baltimore city" ~ "baltimore",
+    fips == "va-virginia beach city" ~ "virginia beach",
+    fips == "va-richmond city" ~ "richmond",
+    fips == "va-norfolk city" ~ "norfolk",
+    fips == "nv-reno city" ~ "reno",
+    fips == "va-chesapeake city" ~ "chesapeake",
+    fips == "va-alexandria city" ~ "alexandria",
+    fips == "va-newport news city" ~ "newport news",
+    fips == "va-hampton city" ~ "hampton",
+    fips == "va-suffolk city" ~ "suffolk",
+    fips == "va-portsmouth city" ~ "portsmouth",
+    fips == "va-roanoke city" ~ "roanoke",
+    fips == "va-charlottesville city" ~ "charlottesville",
+    fips == "va-lynchburg city" ~ "lynchburg",
+    fips == "va-danville city" ~ "danville",
+    fips == "va-petersburg city" ~ "petersburg",
+    fips == "va-salem city" ~ "salem",
+    fips == "va-staunton city" ~ "staunton",
+    fips == "va-winchester city" ~ "winchester",
+    fips == "va-fredericksburg city" ~ "fredericksburg",
+    fips == "va-hopewell city" ~ "hopewell",
+    fips == "va-waynesboro city" ~ "waynesboro",
+    fips == "va-colonial heights city" ~ "colonial heights",
+    fips == "va-bristol city" ~ "bristol",
+    fips == "va-radford city" ~ "radford",
+    fips == "va-martinsville city" ~ "martinsville",
+    fips == "va-buena vista city" ~ "buena vista",
+    fips == "nv-clark" ~ "clark",
+    fips == "ga-atlanta" ~ "atlanta",
+    fips == "ga-stone mountain" ~ "stone mountain",
+    fips == "ga-coweta" ~ "coweta",
+    fips == "nv-washoe" ~ "washoe",
+    fips == "ga-blue ridge" ~ "blue ridge",
+    fips == "ga-augusta" ~ "augusta",
+    fips == "ga-bell-forsyth" ~ "bell-forsyth",
+    fips == "ga-chattahoochee" ~ "chattahoochee",
+    fips == "ga-griffin" ~ "griffin",
+    fips == "ga-eastern" ~ "eastern",
+    fips == "ga-piedmont" ~ "piedmont",
+    fips == "ga-Ssouthern" ~ "southern",
+    fips == "ga-macon" ~ "macon",
+    fips == "ga-lookout mountain" ~ "lookout mountain",
+    fips == "ga-ocmulgee" ~ "ocmulgee",
+    fips == "MA-Northwestern" ~ "northwestern",
+    fips == "ga-alcovy" ~ "alcovy",
+    fips == "ga-cherokee" ~ "cherokee",
+    fips == "ga-brunswick" ~ "brunswick",
+    fips == "ga-ogeechee" ~ "ogeechee",
+    fips == "ga-western" ~ "western",
+    fips == "ga-appalachian" ~ "appalachian",
+    fips == "ga-northern" ~ "northern",
+    fips == "ga-conasauga" ~ "conasauga",
+    fips == "ga-mountain" ~ "mountain",
+    fips == "ga-middle" ~ "middle",
+    fips == "ga-southwestern" ~ "southwestern",
+    fips == "ga-towaliga" ~ "towaliga",
+    fips == "ga-tallapoosa" ~ "tallapoosa",
+    fips == "ga-tifton" ~ "tifton",
+    fips == "wi-st. croix" ~ "st. croix",
+    fips == "ga-south georgia" ~ "south georgia",
+    fips == "ga-rome" ~ "rome",
+    fips == "ga-dublin" ~ "dublin",
+    fips == "ga-enotah" ~ "enotah",
+    fips == "ga-oconee" ~ "oconee",
+    fips == "nv-douglas" ~ "douglas",
+    fips == "ga-alapaha" ~ "alapaha",
+    fips == "ga-toombs" ~ "toombs",
+    fips == "ga-atlantic" ~ "atlantic",
+    fips == "nv-lyon" ~ "lyon",
+    fips == "wi-menominee and shawano" ~ "shawano",
+    fips == "nv-elko" ~ "elko",
+    fips == "nv-nye" ~ "nye",
+    fips == "nv-churchill" ~ "churchill",
+    fips == "mn-lesueur" ~ "lesueur",
+    fips == "il-dewitt" ~ "dewitt",
+    fips == "nv-humboldt" ~ "humboldt",
+    fips == "nv-white pine" ~ "white pine",
+    fips == "mn-lac qui parle" ~ "lac qui parle",
+    fips == "nv-storey" ~ "storey",
+    fips == "nv-lander" ~ "lander",
+    fips == "nv-lincoln" ~ "lincoln",
+    fips == "nv-pershing" ~ "pershing",
+    fips == "nv-mineral" ~ "mineral",
+    fips == "ga-pataula" ~ "pataula",
+    fips == "nv-eureka" ~ "eureka",
+    fips == "nv-esmeralda" ~ "esmeralda",
+    TRUE ~ location))
+
+# Manual fixes to fips_type
+locals <- locals %>%
+  mutate(fips_type = case_when(
+    fips %in% c(
+      "mo-st. louis city", "md-baltimore city", "va-virginia beach city", 
+      "va-richmond city", "va-norfolk city", "nv-reno city", 
+      "va-chesapeake city", "va-alexandria city", "va-newport news city", 
+      "va-hampton city", "va-suffolk city", "va-portsmouth city", 
+      "va-roanoke city", "va-charlottesville city", "va-lynchburg city", 
+      "va-danville city", "va-petersburg city", "va-salem city", 
+      "va-staunton city", "va-winchester city", "va-fredericksburg city", 
+      "va-hopewell city", "va-waynesboro city", "va-colonial heights city", 
+      "va-bristol city", "va-radford city", "va-martinsville city", 
+      "va-buena vista city", "nv-clark", "ga-atlanta", "ga-stone mountain", 
+      "ga-coweta", "nv-washoe", "ga-blue ridge", "ga-augusta", 
+      "ga-bell-forsyth", "ga-chattahoochee", "ga-griffin", "ga-eastern", 
+      "ga-piedmont", "ga-Ssouthern", "ga-macon", "ga-lookout mountain", 
+      "ga-ocmulgee", "ma-northwestern", "ga-alcovy", "ga-cherokee", 
+      "ga-brunswick", "ga-ogeechee", "ga-western", "ga-appalachian", 
+      "ga-northern", "ga-conasauga", "ga-mountain", "ga-middle", 
+      "ga-southwestern", "ga-towaliga", "ga-tallapoosa", "ga-tifton", 
+      "wi-st. croix", "ga-south georgia", "ga-rome", "ga-dublin", 
+      "ga-enotah", "ga-oconee", "nv-douglas", "ga-alapaha", "ga-toombs", 
+      "ga-atlantic", "nv-lyon", "wi-menominee and shawano", "nv-elko", 
+      "nv-nye", "nv-churchill", "mn-lesueur", "il-dewitt", "nv-humboldt", 
+      "nv-white pine", "mn-lac qui parle", "nv-storey", "nv-lander", 
+      "nv-lincoln", "nv-pershing", "nv-mineral", "ga-pataula", 
+      "nv-eureka", "nv-esmeralda", "ms-dutchess", "ga-dutchess", "va-dutchess") ~ "place",
+    TRUE ~ fips_type))
+
+
+# Separate into two datasets for county fips and place fips
+county_fips <- locals %>%
+  filter(fips_type == "county")
+place_fips <- locals %>%
+  filter(fips_type == "place")
+
+county_fips <- county_fips %>%
+  # Variable no longer needed
+  select(-fips_type) %>%
+  # Remove missing fips
+  filter(!is.na(fips)) %>%
+  # Rename variables
+  rename(county = location) %>%
+  # Remove state fips from string
+  mutate(fips = substr(fips, 3, 5))
+
+place_fips <- place_fips %>%
+  # Variable no longer needed
+  select(-fips_type) %>%
+  # Remove unified and city label
+  mutate(location = gsub("unified", "", location)) %>%
+  mutate(location = gsub("city", "", location)) %>%
+  # Remove white space
+  mutate(location = str_trim(location)) %>%
+  # Remove missing locations
+  filter(!is.na(location)) %>%
+  # Rename variables
+  rename(locality = location) %>%
+  mutate(locality = case_when(
+    locality == "jefferson , no r1" ~ "jefferson",
+    TRUE ~ locality))
+```
+
+```{r Locals Race Cleaning}
+# Manual Race Cleaning 
+
+county_fips <- county_fips %>%
+  mutate(race = case_when(
+    full_name == "lori yokoyama" ~ "asian",
+    full_name == "genevieve jones wright" ~ "black",
+    full_name == "robert mcculloch" ~ "white",
+    full_name == "scott shellenberger" ~ "white",
+    full_name == "timothy lohmar" ~ "white",
+    full_name == "anthony golik" ~ "white",
+    full_name == "don dubain" ~ "white",
+    full_name == "charles smith" ~ "white",
+    full_name == "andrew miller" ~ "white",
+    full_name == "candace baker leit" ~ "white",
+    full_name == "d. donovan" ~ "white",
+    full_name == "christopher allred" ~ "white",
+    full_name == "e. rollins" ~ "white",
+    full_name == "gregory banks" ~ "white",
+    full_name == "larry morse" ~ "white",
+    full_name == "susan baur" ~ "white",
+    full_name == "john hubert" ~ "white",
+    full_name == "nathan fugate" ~ "white",
+    TRUE ~ race))
+
+place_fips <- place_fips %>%
+  mutate(race = case_when(
+    full_name == "steve wolfson" ~ "white",
+    full_name == "paul howard" ~ "black",
+    full_name == "sherry boston" ~ "black",
+    full_name == "chris hicks" ~ "white",
+    full_name == "kimberly gardner" ~ "black",
+    full_name == "ashley wright" ~ "white",
+    full_name == "marilyn mosby" ~ "black",
+    full_name == "colin stolle" ~ "white",
+    full_name == "shannon wallace" ~ "white",
+    full_name == "penny penn" ~ "white",
+    full_name == "benjamin coker" ~ "white",
+    full_name == "meg heap" ~ "white",
+    full_name == "layla zon" ~ "white",
+    full_name == "jackie johnson" ~ "white",
+    full_name == "michael herring" ~ "black",
+    full_name == "herbert franklin" ~ "white",
+    full_name == "brad smith" ~ "white",
+    full_name == "stephen bradley" ~ "white",
+    full_name == "ken mauldin" ~ "white",
+    full_name == "b. sosebee" ~ "white",
+    full_name == "richard mallard" ~ "white",
+    full_name == "gregory underwood" ~ "black",
+    full_name == "karl s hall" ~ "white",
+    full_name == "nancy parr" ~ "white",
+    full_name == "kenneth welch" ~ "black",
+    full_name == "bryan porter" ~ "white",
+    full_name == "william grady" ~ "white",
+    full_name == "parks white" ~ "white",
+    full_name == "john j kadlic" ~ "white",
+    full_name == "bert poston" ~ "white",
+    full_name == "howard gwynn" ~ "black",
+    full_name == "a 'don' weeks" ~ "white",
+    full_name == "richard berube" ~ "white",
+    full_name == "george christian" ~ "white",
+    full_name == "plez hardin" ~ "white",
+    full_name == "hayward altman" ~ "white",
+    full_name == "india walton" ~ "black",
+    full_name == "anton bell" ~ "black",
+    full_name == "joe mulholland" ~ "white",
+    full_name == "jonathan adams" ~ "white",
+    full_name == "leigh patterson" ~ "white",
+    full_name == "paul bowden" ~ "white",
+    full_name == "craig fraser" ~ "white",
+    full_name == "jack browning" ~ "white",
+    full_name == "jeffry wosje" ~ "white",
+    full_name == "mark b jackson" ~ "white",
+    full_name == "j. durden" ~ "white",
+    full_name == "stephen b rye" ~ "white",
+    full_name == "stephanie morales" ~ "black",
+    full_name == "donald caldwell" ~ "white",
+    full_name == "dick perryman" ~ "white",
+    full_name == "greg parker" ~ "white",
+    full_name == "sharon wolcott" ~ "white",
+    full_name == "david woods" ~ "white",
+    full_name == "christopher falk" ~ "white",
+    full_name == "tyler ingram" ~ "white",
+    full_name == "joseph platania" ~ "white",
+    full_name == "bethany harrison" ~ "white",
+    full_name == "chris arabia" ~ "white",
+    full_name == "nick hobbs" ~ "white",
+    full_name == "gary woronchak" ~ "white",
+    full_name == "kim white" ~ "white",
+    full_name == "t.j. wright" ~ "white",
+    full_name == "john washington" ~ "white",
+    full_name == "melvin hill" ~ "black",
+    full_name == "juanita perez williams" ~ "hispanic",
+    full_name == "kurt wilson" ~ "white",
+    full_name == "william salter" ~ "white",
+    full_name == "cam winton" ~ "white",
+    full_name == "art mallory" ~ "white",
+    full_name == "harold 'skip' walther" ~ "white",
+    full_name == "lyndy wells" ~ "white",
+    full_name == "brent christian" ~ "white",
+    full_name == "michael newman" ~ "white",
+    full_name == "cheryl wilson" ~ "black",
+    full_name == "carlos hutcherson" ~ "black",
+    full_name == "thomas bowers" ~ "white",
+    full_name == "raymond robertson" ~ "white",
+    full_name == "marc abrams" ~ "white",
+    full_name == "marianne walles" ~ "white",
+    full_name == "william 'dock' walls" ~ "black",
+    full_name == "randall williams" ~ "white",
+    full_name == "joshua 'josh' wander" ~ "white",
+    full_name == "nicholas anthony del vecchio" ~ "white",
+    full_name == "labravia jenkins" ~ "black",
+    full_name == "ruby faye woolridge" ~ "black",
+    full_name == "richard newman" ~ "white",
+    full_name == "david ledbetter" ~ "white",
+    full_name == "terry whitt bailey" ~ "black",
+    full_name == "kathi wright" ~ "white",
+    full_name == "matthew walsh" ~ "white",
+    full_name == "hollies winston" ~ "black",
+    full_name == "jerry wolfe" ~ "white",
+    full_name == "rodney wiltshire" ~ "white",
+    full_name == "jeremiah 'jerry' walker" ~ "black",
+    full_name == "'outlaw' josey wales iv" ~ "white",
+    full_name == "christian rehak" ~ "white",
+    full_name == "michael a wheable" ~ "white",
+    full_name == "sheldon watts" ~ "black",
+    full_name == "richard stulz" ~ "white",
+    full_name == "michael williams" ~ "white",
+    full_name == "alex white" ~ "white",
+    full_name == "harry gravely" ~ "white",
+    full_name == "raymond work" ~ "white",
+    full_name == "zachary running wolf" ~ "other",
+    full_name == "kristi weaver pena" ~ "white",
+    full_name == "anne langer" ~ "white",
+    full_name == "theodore c herrera" ~ "black",
+    full_name == "dylan v frehner" ~ "white",
+    full_name == "r bryce shields" ~ "white",
+    full_name == "chris woods" ~ "black",
+    full_name == "larry white" ~ "white",
+    full_name == "joan ziglar" ~ "black",
+    full_name == "sean alden rowe" ~ "white",
+    full_name == "maya wiley" ~ "black",
+    full_name == "martin walker" ~ "white",
+    full_name == "danny weber" ~ "white",
+    full_name == "t. earnest" ~ "white",
+    full_name == "tracey winbush" ~ "black",
+    full_name == "kevin wolff" ~ "white",
+    full_name == "stephanie woodruff" ~ "white",
+    full_name == "christopher russell" ~ "white",
+    full_name == "amber white" ~ "white",
+    full_name == "janet wilson" ~ "white",
+    full_name == "jared moon" ~ "white",
+    full_name == "sharon webb" ~ "black",
+    full_name == "ludye wallace" ~ "black",
+    full_name == "robert e glennen iii" ~ "white",
+    full_name == "lemichael wilson" ~ "black",
+    full_name == "david phillip walker" ~ "black",
+    full_name == "jeffrey alan wagner" ~ "white",
+    full_name == "gwendolyn ward osborne chapman" ~ "black",
+    full_name == "glenn wrightson" ~ "white",
+    full_name == "richard wright" ~ "black",
+    full_name == "darryl williams" ~ "black",
+    full_name == "angela ward" ~ "black",
+    full_name == "rahn workcuff" ~ "black",
+    full_name == "john charles wilson" ~ "black",
+    full_name == "sammuel washington" ~ "black",
+    full_name == "chris wahmhoff" ~ "white",
+    full_name == "cheryl roshanna webb" ~ "black",
+    full_name == "jonathan wainscott" ~ "white",
+    full_name == "david james wyatt" ~ "black",
+    full_name == "lynette wesley" ~ "black",
+    TRUE ~ race))
+```
+
+```{r Saving Locals Files}
+write.csv(locals, "cleaned_full_locals.csv")
+write.csv(county_fips, "cleaned_county_fips.csv")
+write.csv(place_fips, "cleaned_place_fips.csv")
+```
+
+
+## Cleaning State Legislature Candidates
+
+Dataset citation:
+Klarner, Carl. 2022. “State Legislative Election Returns, 1967-2022.” 
+doi:10.7910/DVN/3WZFK9.
+
+Note: Full dataset provided by Professor Klarner. Please see his website for access: https://www.klarnerpolitics.org/data-for-sale.
+
+```{r Load Sleg}
+# Read in state legislature data
+sleg <- read.csv("sleg.csv")
+```
+
+```{r Organize Sleg}
+sleg <- sleg %>%
+  # Filter to relevant years
+  filter(year >= 2012) %>%
+  # Remove meaningless counties
+  filter(cname != "emergencyutilityworkers" & cname != "stateuocava") %>%
+  # Remove irrelevant variables
+  select(-c(uncert, sid, mmdpost, dseats, popnum, nest, nest1, nest2, nest3, eseats, term, termz, partytsource, hold, hold1, hold2, tenure1, tenure2, limit, middle2, nick, namenum, last1, last2, last3, last3, ltype1, ltype2, ltype3, ltype4, lastb, firstb, middleb, middle2b, nickb, suffixb, last1b, last2b, ltype1b, ltype2b, namebsource, v38, v39, nonlasto, middle2o, nicko, nonlasto,suffix, prefix, sicpsr, ddez, specpost, redist, redist1, redist2, redist3, regime, flot, flot1, flot2, flot3, deter, cando, candformat, partyo, party, firstcase, v56, v57, v58, v18_20171211, v19_20171211, v19_20160217, candid20190807, candid20210504, candid20210504, cand20210504,cand20190807, candpartyo, lasto, firsto, middleo, suffixo, last4, vote, cand, partyt, prior1, prior2, geopost, dtype)) %>%
+  # Rename variables 
+   rename(state = sab, state_fips = sfips, senate = sen, election_type = etype, party = partyz, last_name = last, first_name = first, middle_name = middle, cand_id = candid, case_id = caseid, incumbency = exper) %>%
+   # Remove 1 withdrawal case
+ filter(outcome != "withdrew") %>%
+  # Assign clearer values
+  mutate(outcome = case_when(
+    outcome == "w" ~ "won",
+    # Candidates who lost in a runoff are marked as lost
+    outcome == "r" ~ "lost",
+    outcome == "l" ~ "lost",
+    outcome == "t" ~ "tie")) %>%
+  # Geraldo Alicea and Peter Durant came to an exact tie, then Durant won in a special election
+  mutate(outcome = ifelse(last_name == "alicea" & outcome == "tie", "lost", outcome)) %>%
+  mutate(outcome = ifelse(last_name == "durant" & outcome == "tie", "won", outcome)) %>%
+  # Denotes write-in/scattering, so remove
+  filter(party != "w") %>%
+  # Assign clearer values
+  mutate(party = case_when(
+    party == "d" ~ "democrat",
+    party == "r" ~ "republican",
+    # denotes non-major party
+    party == "nm" ~ "other",
+    # Fused Democrat and Republican, when votes for the two parties aren't separately reported on the ballot
+    party == "b" ~ "fused",
+    party == "np" ~ "non-partisan election")) %>%
+  mutate(election_type = case_when(
+    election_type == "g" ~ "general",
+    election_type %in% c("s", "gs", "ssg", "nps") ~ "special",
+    election_type %in% c("ttp", "dp", "rp", "upf", "7thindepp", "amerindepp", "conservativep", "constamerindepp", "constp", "greenp", "indepamerp", "indepp", "indepp1", "indepp2", "indeppartyofdelp", "liberp", "libertyunionp", "mountainp", "petitioningcandp", "progp", "workp", "amerpfsettled", "dpfsettled", "dpfunsettled", "indeppfsettled", "liberpfsettled", "rpfsettled", "rpfunsettled", "thegreenpfsettled", "unapfsettled", "dpsgf", "dpsf") ~ "primary",
+    election_type %in% c("runoff", "lasrunoff", "larunoff", "dprunoff", "dpsgrunoff", "dpsrunoff", "grunoff", "rprunoff", "srunoff", "dpfsettled", "sfunsettled", "srunoff", "lafsettled", "lafunsettled", "lasf") ~ "runoff")) %>%
+   mutate(incumbency = case_when(
+    incumbency == "inc" ~ "incumbent",
+    incumbency == "sinc" ~ "incumbent",
+    TRUE ~ "challenger")) %>%
+  # Change empty cells to NA
+  mutate(across(
+    c(first_name, middle_name, cname, cfips), 
+    ~ na_if(str_trim(.x), ""))) %>%
+  # Label all districts with their states so they are distinct
+   mutate(dno = paste(state, dno, sep = "_")) %>%
+  # Put leading zeros as needed for county fips
+  mutate(cfips = ifelse(
+    is.na(cfips), NA, 
+    sprintf("%03d", as.integer(cfips))))
+```
+
+```{r Clean Districts Sleg}
+sleg <- sleg %>%
+  # Group by district number
+  group_by(dno) %>%
+  # Create a variable that has all cfips within that district pasted together
+  mutate(all_counties = ifelse(!is.na(cfips), paste(unique(cfips[!is.na(cfips)]), collapse = "_"), NA)) %>%
+  # Ensure rows with that dno with a missing cfips get the all_counties value
+  fill(all_counties, .direction = "downup") %>%
+  # Ungroup
+  ungroup()
+
+expanded_rows <- sleg %>%
+  # Filter to rows with missing cfips
+  filter(is.na(cfips)) %>% 
+  # Separate all_counties values into separate rows for each value
+  separate_rows(all_counties, sep = "_") %>% # 
+  mutate(cfips = all_counties) %>% # Assign each split value to cfips
+  select(-all_counties) # Optionally remove all_counties if it's no longer needed
+
+sleg <- sleg %>%
+  # Keep only rows with existing cfips
+  filter(!is.na(cfips)) %>% 
+  # Add the expanded rows 
+  bind_rows(expanded_rows) %>%
+  select(-all_counties)
+```
+
+```{r Matching Dataset Sleg}
+# Create matching datasest for protest data
+state_district_fips <- sleg %>%
+  # Create dataset of fips, district number, and state
+  select(cfips, dno, state) %>%
+  # Remove redundant matches
+  distinct() %>%
+  # Rename variable
+  rename(fips = cfips)
+```
+
+
+## State Legislatures BISG
+
+
+```{r Sleg Prep}
+SlegBISG <- sleg %>%
+  # Rename variable
+  rename(county_fips = cfips) %>%
+  # Grab relevant variables
+  select(county_fips, last_name, first_name, middle_name, state, party) %>%
+  # Reassign values
+  mutate(party = case_when(
+    party == "democrat" ~ "1",
+    party == "republican" ~ "2",
+    # Coding other non-partisan and fused as other
+    TRUE ~ "0")) %>%
+  # Remove white spaces
+  mutate(county_fips = str_trim(county_fips)) %>%
+    # Put leading zeros as needed
+  mutate(county_fips = ifelse(
+    is.na(county_fips), NA, 
+    sprintf("%03d", as.integer(county_fips)))) %>%
+  # Rename variables
+  rename(surname = last_name,
+         county = county_fips,
+         first = first_name,
+         middle = middle_name) %>%
+  # Remove rows without county or last name
+  filter(!is.na(county) & !is.na(surname)) %>%
+  # Remove redundancies
+  distinct()
+```
+
+```{r Sleg BISG}
+# Predict race
+RSlegBISG <- predict_race(
+  voter.file = SlegBISG,
+  census.surname = TRUE,
+  surname.only = FALSE,
+  names.to.use = "surname, first, middle",
+  census.geo = "county",
+  census.key = Sys.getenv("CENSUS_API_KEY"),
+  party = "party",
+  year = "2010",
+  skip_bad_geos = TRUE) 
+```
+
+```{r Organize Sleg Race}
+RSlegBISG <- RSlegBISG %>%
+  # Filter to distinct candidates
+  distinct(surname, first, county, state, .keep_all = TRUE) %>%
+  # Group by candidate
+  group_by(surname, first, middle, state, party) %>%
+  # Compute the average race prediction of the candidate across all counties in the state
+  mutate(avg_white = mean(pred.whi),
+         avg_black = mean(pred.bla),
+         avg_his = mean(pred.his),
+         avg_asi = mean(pred.asi),
+         avg_other = mean(pred.oth)) %>%
+  # Assign candidate's race based on highest average
+  mutate(
+      race = case_when(
+      avg_white == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "white",
+      avg_black == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "black",
+      avg_his == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "hispanic",
+      avg_asi == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "asian",
+      avg_other == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "other")) 
+
+# Convert to data frame
+RSlegBISG <- as.data.frame(RSlegBISG)
+
+RSlegBISG <- RSlegBISG %>%
+  # Grab relevant variables
+  select(surname, first, state, middle, county, race) %>%
+  # Rename variables
+  rename(first_name = first,
+         last_name = surname,
+         middle_name = middle,
+         county_fips = county) %>%
+  # Remove redundancies
+   distinct(first_name, last_name, state, middle_name, .keep_all = TRUE)
+```
+
+```{r Re-Merge Sleg}
+# Merge with full state legislature dataset
+sleg_BISG <- left_join(sleg, RSlegBISG, by = c("state", "last_name", "first_name"))
+sleg_BISG <- sleg_BISG %>%
+  distinct(cand_id, year, .keep_all = TRUE)
+```
+
+
+```{r Save Cleaned Sleg}
+write.csv(sleg_BISG, "cleaned_sleg.csv")
+```
+
+
+## House Primaries 2020
+
+Dataset citation for 2020 data:
+Lempert, Julianne. 2025. “US House Primary Elections 2020 with Race and Gender.” doi:10.7910/DVN/SBQJS4.
+
+```{r Load HouseP20}
+house_primaries_2020 <- read.csv("house_primaries_2020.csv")
+```
+
+```{r Organize HouseP20}
+house_primaries_2020 <- house_primaries_2020 %>%
+  # Removes unnecessary variables
+  select(-c(primary_date,race.source.if.not.Ballotpedia.profile)) %>%
+  # Labels all districts with their states so they are distinct
+  mutate(district = paste(state, district, sep = "_")) %>%
+  # Turn empty spaces to NA
+  mutate(across(everything(), ~na_if(str_trim(.x), ""))) %>%
+  # Match values to other house primaries dataset
+  mutate(gender = case_when(
+    gender == "WOMAN" ~ "FEMALE",
+    gender == "MAN" ~ "MALE",
+    gender == "NOT_FOUND" ~ NA)) %>%
+  mutate(race = case_when(
+    race == "NOT_FOUND" ~ NA,
+    TRUE ~ race)) %>%
+  # Rename variable
+  rename(party = party..if.top.two.system.) %>%
+  # If a candidate ran in a party primary, put the party primary as the candidate's individual party. If the candidate ran in a top-two system, leave the candidate's individual party designation.
+  mutate(party = ifelse(is.na(party), party_primary, party)) %>%
+  # Variable no longer needed
+  select(-party_primary) %>%
+  # Match values to other house primaries dataset
+  mutate(party = case_when(
+    party == "DEMOCRATIC" ~ "DEMOCRAT",
+    party != "DEMOCRAT" & party != "REPUBLICAN" ~ "OTHER",
+    TRUE ~ party)) %>%
+  mutate(year = 2020) %>%
+  # Note that there are two Democratic winners in WA_10 due to top-two system
+  mutate(result = case_when(
+    # Lost in Democratic primary runoff
+    first_name == "LISA" & last_name == "RING" ~ "LOST",
+    # Lost in Republican primary runoff
+    first_name == "JOHN" & last_name == "COWAN" ~ "LOST",
+    # Lost in Democratic primary runoff
+    first_name == "BROOKE" & last_name == "SISKIN" ~ "LOST",
+     # Lost in Republican primary runoff
+    first_name == "MATT" & last_name == "GURTLER" ~ "LOST",
+    # Lost in Republican primary runoff
+    first_name == "TERRY" & last_name == "NEESE" ~ "LOST",
+    TRUE ~ result))
+```
+
+
+## Cleaning House of Repsentatives Candidates (Primaries)
+
+Dataset citation for 2012-2018 data:
+Miller, Michael, and Nicki Camberg. 2020. “U.S. House Primary Election Results (2012-2018).” doi:10.7910/DVN/CXVMSY.
+
+```{r Load HouseP}
+# Read in data
+house_primaries <- read.delim("house_primaries 2012-2018.tab", header = TRUE)
+```
+
+```{r Organize HouseP}
+# Create named vector to reassign spelled-out states to abbreviations
+state_mapping <- c(
+  "alabama" = "AL", "alaska" = "AK", "arizona" = "AZ", "arkansas" = "AR", 
+  "california" = "CA", "colorado" = "CO", "connecticut" = "CT", "delaware" = "DE",
+  "florida" = "FL", "georgia" = "GA", "hawaii" = "HI", "idaho" = "ID",
+  "illinois" = "IL", "indiana" = "IN", "iowa" = "IA", "kansas" = "KS",
+  "kentucky" = "KY", "louisiana" = "LA", "maine" = "ME", "maryland" = "MD",
+  "massachusetts" = "MA", "michigan" = "MI", "minnesota" = "MN", "mississippi" = "MS",
+  "missouri" = "MO", "montana" = "MT", "nebraska" = "NE", "nevada" = "NV",
+  "new hampshire" = "NH", "new jersey" = "NJ", "new mexico" = "NM", "new york" = "NY",
+  "north carolina" = "NC", "north dakota" = "ND", "ohio" = "OH", "oklahoma" = "OK",
+  "oregon" = "OR", "pennsylvania" = "PA", "rhode island" = "RI", "south carolina" = "SC",
+  "south dakota" = "SD", "tennessee" = "TN", "texas" = "TX", "utah" = "UT",
+  "vermont" = "VT", "virginia" = "VA", "washington" = "WA", "west virginia" = "WV",
+  "wisconsin" = "WI", "wyoming" = "WY")
+
+house_primaries <- house_primaries %>%
+  # Remove irrelevant variables or columns with one value
+  select(-c(seat, redist, fr, prez, votep, incname, candvotes, 
+            tvotes, office, qual, definc, law,
+            candpct, type, candnumber)) %>%
+# Rename variables
+   rename(contest_id = raceid,
+         candidate_name = candidate,
+         incumbent = inc) %>%
+# Assign clearer values
+# Party refers to the primary contest held, not self-identified party of candidate
+  mutate(party = case_when(
+    party == 0 ~ "rep",
+    party == 1 ~ "dem")) %>%
+# Index at vector to reassign state values
+   mutate(state = state_mapping[state]) %>%
+# Assign clearer values
+   mutate(gender = case_when(
+    gender == 0 ~ "male",
+    gender == 1 ~ "female")) %>%
+  mutate(runoff = case_when(
+    runoff == 0 ~ "not run-off state or run-off not needed",
+    runoff == 1 ~ "primary triggered a run-off, no nomination determined",
+    runoff == 2 ~ "two-candidate run-off, winner advances to general")) %>%
+  mutate(winner = case_when(
+    winner == 1 ~ "WON",
+    winner == 0 ~ "LOST")) %>%
+  mutate(incumbent = case_when(
+    incumbent == 1 ~ "YES",
+    incumbent == 0 ~ "NO")) %>%
+# Extract just district component of string
+  mutate(stcd = str_sub(stcd, -2)) %>% 
+# Rename variables for clarity
+  rename(district = stcd, result = winner) %>%
+# Labels all districts with their states so they are distinct
+   mutate(district = str_remove(district, "^0+")) %>%
+  mutate(district = paste(state, district, sep = "_"))
+```
+
+```{r Name Cleaning HouseP}
+house_primaries <- house_primaries %>%
+# Separate candidate names
+  separate(candidate_name, into = c("last_name", "first_name", "extra_name"), sep = "_", 
+           extra = "merge", fill = "right") %>%
+# Remove components of extra names (including white spaces) that aren't meaningful
+  mutate(extra_name = gsub("\\s*(jr|iii|i|ii|sr)\\s*", "", extra_name)) %>%
+# Replace underscores with a space
+  mutate(extra_name = gsub('_', ' ', extra_name)) %>%
+# Change any cell with just white spaces to NA
+  mutate(extra_name = ifelse(str_trim(extra_name) == "", NA, extra_name)) %>%
+# Remove parentheses
+  mutate(extra_name = gsub("[()]", "", extra_name)) %>%
+# Remove redundant rows
+  distinct(year, district, last_name, first_name, .keep_all = TRUE) %>%
+# Set to uppercase to match 2020 dataset
+  mutate(across(c("party", "last_name", "first_name", "extra_name", "result", "incumbent", "gender", "runoff"), ~toupper(.x)))
+
+# If first name is a suffix, the extra name was the first name 
+# so move extra name value to first name
+house_primaries$first_name <- 
+  ifelse(house_primaries$first_name %in% c("jr", "sr", "ii", "iii", "iv"), 
+         house_primaries$extra_name, house_primaries$first_name)
+
+# Fill extra name with NA if extra name value got moved to first name
+house_primaries$extra_name <-
+  ifelse(house_primaries$extra_name == house_primaries$first_name, NA, 
+         house_primaries$extra_name)
+
+# Not using for BISG
+house_primaries <- house_primaries %>% select(-extra_name)
+```
+
+# House (Primaries) BISG
+
+```{r Merge HouseP}
+# Merge full house dataset with matching dataset on state and district
+housep <- left_join(house_primaries, full_match, by = c("state", "district"))
+```
+
+```{r HouseP Prep}
+HpBISG <- housep %>%
+  # Grab relevant columns
+  select(county_fips, last_name, first_name, state, party) %>%
+  # Reassign values
+  mutate(party = case_when(
+    party == "DEMOCRAT" ~ "1",
+    party == "REPUBLICAN" ~ "2",
+    party == "OTHER" ~ "0")) %>%
+  # Remove white space
+  mutate(county_fips = str_trim(county_fips)) %>%
+  # Put leading zeros as needed
+  mutate(county_fips = ifelse(
+    is.na(county_fips), NA, 
+    sprintf("%03d", as.integer(county_fips)))) %>%
+  # Rename variables
+  rename(surname = last_name,
+         county = county_fips,
+         first = first_name) %>%
+  # Remove rows missing county or last name
+  filter(!is.na(county) & !is.na(surname)) %>%
+  # Remove redudancies
+  distinct()
+```
+
+```{r HouseP BISG}
+# Generate race predictions
+HpBISG <- predict_race(
+  voter.file = HpBISG,
+  census.surname = TRUE,
+  surname.only = FALSE,
+  names.to.use = "surname, first",
+  census.geo = "county",
+  census.key = Sys.getenv("CENSUS_API_KEY"),
+  party = "party",
+  year = "2010",
+  model = "fBISG",
+  skip_bad_geos = TRUE) 
+```
+
+```{r Organize HouseP Race}
+RHpBISG <- HpBISG %>%
+  # Remove duplicates of candidates within counties
+  distinct(first, surname, county, state, .keep_all = TRUE) %>%
+  # Group by candidate
+  group_by(first, surname, state) %>%
+  # Compute the average race prediction of the candidate across all counties in the district
+  mutate(avg_white = mean(pred.whi),
+         avg_black = mean(pred.bla),
+         avg_his = mean(pred.his),
+         avg_asi = mean(pred.asi),
+         avg_other = mean(pred.oth)) %>%
+   # Assign candidate's race based on highest average
+    mutate(
+      race = case_when(
+      avg_white == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "white",
+      avg_black == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "black",
+      avg_his == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "hispanic",
+      avg_asi == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "asian",
+      avg_other == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "other")) 
+
+# Convert to data frame
+RHpBISG <- as.data.frame(RHpBISG)
+
+RHpBISG <- RHpBISG %>%
+  # Group by candidate
+   group_by(first, surname, state) %>%
+    mutate(
+      race = case_when(
+    # When the average white and Black estimates are close, there is at least a 0.3 average chance the candidate is Black, and the party is Democrat, flag as a check
+  abs(avg_white - avg_black) <= 0.2 & avg_black >= 0.3 & party == "1" ~ "check",
+  TRUE ~ race)) %>%
+  # Ungroup
+  ungroup() %>%
+  # Select relevant variables
+ select(surname, first, state, race) %>%
+  # Rename variables
+  rename(first_name = first,
+         last_name = surname) %>%
+  # Remove redundancies
+   distinct()
+```
+
+```{r Re-Merge}
+# Combine full house dataset with race predictions
+housep_BISG <- left_join(house_primaries, RHpBISG, by = c("state", "last_name", "first_name"))
+```
+
+```{r Manual HouseP Race Cleaning}
+# Note that no candidates' race marked as "check"
+# Filling in missing race via manual online collection
+# Ballotpedia, BallotReady etc.
+
+housep_BISG <- housep_BISG %>%
+  mutate(race = case_when(
+    last_name == "ABENTROTH" ~ "white",
+    last_name == "ARMSTRONG" ~ "white",
+    last_name == "BARNEY" ~ "white",
+    last_name == "BARTH" ~ "white",
+    last_name == "BEAUDRY" ~ "white",
+    last_name == "BJORKMAN" ~ "white",
+    last_name == "BROSTEN" ~ "white",
+    last_name == "CAMPBELL" ~ "white",
+    last_name == "CARNEY" ~ "white",
+    last_name == "CHENEY" ~ "white",
+    last_name == "CHESNUT" ~ "white",
+    last_name == "CHRISTENSEN" ~ "white",
+    last_name == "CISSNA" ~ "white",
+    last_name == "COX" & first_name == "JOHN" ~ "hispanic",
+    last_name == "CRAMER" ~ "white",
+    last_name == "CUMINGS" ~ "white",
+    last_name == "DAINES" ~ "white",
+    last_name == "DONKA" ~ "white",
+    last_name == "FREILICH" ~ "white",
+    last_name == "GALES" ~ "black",
+    last_name == "GALVIN" ~ "white",
+    last_name == "GIANFORTE" ~ "white",
+    last_name == "GILLAN" ~ "white",
+    last_name == "GREENE" ~ "white",
+    last_name == "GULLESON" ~ "white",
+    last_name == "HAFNER" ~ "white",
+    last_name == "HARDY" & first_name == "CHARLES" ~ "white",
+    last_name == "HAWKS" ~ "white",
+    last_name == "HEENAN" ~ "white",
+    last_name == "HEIKES" ~ "white",
+    last_name == "HELM" ~ "white",
+    last_name == "HENRICHSEN" ~ "white",
+    last_name == "HIBLER" ~ "white",
+    last_name == "HINZ" ~ "other", # Native American
+    last_name == "HUNTER" ~ "white",
+    last_name == "IRON" ~ "other", # Native American
+    last_name == "IZZO" ~ "white",
+    first_name == "DUSTY" ~ "white",
+    last_name == "JUNEAU" ~ "white",
+    last_name == "KALK" ~ "white",
+    last_name == "KIER" ~ "white",
+    last_name == "KONSMO" ~ "white",
+    last_name == "KOVACH" ~ "white",
+    last_name == "KREBS" ~ "white",
+    last_name == "LINDBECK" ~ "white",
+    last_name == "LUMMIS" ~ "white",
+    last_name == "MCDERMOTT" ~ "white",
+    last_name == "MELKUS" ~ "white",
+    last_name == "MEYER" ~ "white",
+    last_name == "MILLER" & first_name == "MICHAEL" ~ "other",
+    first_name == "ROD" ~ "white",
+    last_name == "MITCHELL" ~ "white",
+    last_name == "MOORE" & first_name == "MATT" ~ "white",
+    last_name == "MOSS" & first_name == "LYNDA" ~ "white",
+    last_name == "MURPHY" ~ "white",
+    last_name == "NOEM" ~ "white",
+    last_name == "PAAD" ~ "white",
+    last_name == "PAIGE" ~ "white",
+    last_name == "PETTINATO" ~ "white",
+    last_name == "RAMMELL" ~ "white",
+    last_name == "RANKIN" ~ "white",
+    last_name == "REIGLE" ~ "white",
+    last_name == "ROCHESTER" ~ "black",
+    last_name == "SCHNEIDER" ~ "white",
+    last_name == "SENTENEY" ~ "white",
+    last_name == "SHEIN" ~ "white",
+    last_name == "SMITH" & first_name == "DARIN" ~ "white",
+    last_name == "SMITH" & first_name == "DIANE" ~ "white",
+    last_name == "STANLEY" ~ "white",
+    last_name == "STROHMAIER" ~ "white",
+    last_name == "STUBSON" ~ "white",
+    last_name == "STUTZ" ~ "white",
+    last_name == "TAPIO" ~ "white",
+    last_name == "TINGLEY" ~ "white",
+    last_name == "TOWNSEND" ~ "white",
+    last_name == "TYNIO" ~ "other",
+    last_name == "URQUIDI" ~ "white",
+    last_name == "VARILEK" ~ "white",
+    last_name == "VONDERSAAR" ~ "white",
+    last_name == "WALKER" & first_name == "SCOTT" ~ "white",
+    last_name == "WARD" & first_name == "JASON" ~ "white",
+    last_name == "WEIR" ~ "white",
+    last_name == "WELCH" ~ "white",
+    last_name == "WILLIAMS" & first_name == "KATHLEEN" ~ "white",
+    last_name == "WILMER" ~ "white",
+    last_name == "WRIGHT" & first_name == "STEPHEN" ~ "white",
+    last_name == "YOUNG" & first_name == "DON" ~ "white",
+    last_name == "ZINKE" ~ "white",
+    last_name == "SCOTT" & first_name == "TIM" ~ "black",
+    last_name == "WEST" & first_name == "ALLEN" ~ "black",
+    last_name == "HURD" & first_name == "WILL" ~ "black",
+    last_name == "LOVE" ~ "black",
+    TRUE ~ race))
+
+# Drops three cases where race couldn't be found (all three lost election)
+# NELSON	THOMAS, SCHAFFNER	PAUL, and WHITTAKER	JED
+housep_BISG <- housep_BISG %>%
+  filter(!is.na(race))
+```
+
+```{r HouseP Race Cleaning}
+# Identify race mismatches in BISG house primaries dataset with hand collected primaries dataset
+
+# Select variables relevant to identifying mismatches
+housep_past <- housep_BISG %>%
+  select(last_name, first_name, district, race) %>%
+  mutate(race = toupper(race))
+housep2020 <- house_primaries_2020 %>%
+  select(last_name, first_name, district, race)
+
+race_comparisonp <- housep_past %>%
+  # Combine datasets by matching candidates
+  # Appends different suffixes to race columns to distinguish them
+  inner_join(housep2020, by = c("last_name", "first_name", "district"), suffix = c("_past", "_2020")) %>%
+  # Create a variable that identifies race mismatches
+  mutate(race_mismatch = race_past != race_2020) %>%
+  # Filter to mismatches
+  filter(race_mismatch) %>%
+  # Reduce to one row per candidate
+  distinct(first_name, last_name, district, .keep_all = TRUE)
+
+# Merge race comparison dataset back to full dataset
+housep_BISG <- left_join(housep_BISG, race_comparisonp, by = c("last_name", "first_name", "district"))
+
+housep_BISG <- housep_BISG %>%
+  # If there's a race mismatch, the 2020 dataset is correct
+  mutate(race = ifelse(is.na(race_mismatch), race, 
+                       ifelse(race_mismatch, race_2020, race_past))) %>%
+  # Variables no longer needed
+  select(-c(race_past, race_2020, race_mismatch)) %>%
+  # Set to uppercase
+  mutate(race = toupper(race))
+```
+
+```{r Merge Both House Primary Datasets}
+# Bind the rows, matching up by column names
+housep_BISG <- bind_rows(housep_BISG, house_primaries_2020)
+housep_BISG <- housep_BISG %>%
+  mutate(party = case_when(
+    party == "DEM" ~ "DEMOCRAT",
+    party == "REP" ~ "REPUBLICAN",
+    TRUE ~ party))
+```
+
+```{r}
+house_primaries <- housep_BISG
+```
+
+```{r Save House Primaries Dataset}
+# BISG
+write.csv(housep_BISG, "cleaned_house_primaries.csv")
+
+# fBISG
+write.csv(house_primaries, "f:cleaned_house_primaries.csv")
+```
+
+
+## Cleaning House of Representatives Candidates (General)
+
+Dataset citation:
+MIT Election Data And Science Lab. 2017. “U.S. House 1976–2022."
+doi:10.7910/DVN/IG0UN2.
+
+```{r Load HouseG}
+# Read in house data
+house_generals <- read.csv("house_generals through 2022.csv")
+```
+
+```{r Organize HouseG}
+house_generals <- house_generals %>%
+# Subset to relevant years
+  filter(year >= 2012 & year <= 2020) %>%
+# Remove irrelevant variables or columns with only one value
+  select(-c(state, state_cen, state_ic, writein, unofficial, version, office, stage, 
+            special, mode, fusion_ticket, runoff, state_fips)) %>%
+# Remove write-ins because BISG is not possible
+  filter(candidate != "WRITEIN") %>%
+# Any party besides Democrat or Republican gets called Other
+    mutate(party = case_when(
+    str_detect(party, "DEMOCRAT") ~ "DEMOCRAT",
+    str_detect(party, "REPUBLICAN") ~ "REPUBLICAN",
+    TRUE ~ "OTHER")) %>%
+# Rename variables
+  rename(state = state_po, candidate_votes = candidatevotes, total_votes = totalvotes) %>%
+# Filter to only the 50 states
+   filter(state != "DC")
+```
+
+```{r Name Cleaning HouseG}
+house_generals <- house_generals %>%
+# Remove the word in quotes along with the quotes
+  mutate(candidate = gsub(' ".*?" ', ' ', candidate)) %>%
+# Separate candidate names for future BISG analysis
+separate(candidate, into = c("first_name", "middle_name", "last_name", "suffix"), 
+         sep = " ", extra = "merge", fill = "right")
+
+# If nothing was put in last_name, the second name was the last name
+# so move middle_name value to last_name
+house_generals$last_name <- 
+  ifelse(is.na(house_generals$last_name), house_generals$middle_name, 
+         house_generals$last_name)
+
+# Fill middle_name with NA if middle_name value got moved to last_name
+house_generals$middle_name <-
+  ifelse(house_generals$middle_name == house_generals$last_name, NA, 
+         house_generals$middle_name)
+
+# Remove any real suffix and other punctuation
+house_generals <- house_generals %>%
+  mutate(suffix = ifelse(suffix %in% c("JR", "SR", "II", "III", "IV"), NA, suffix)) %>%
+  mutate(middle_name = ifelse(grepl('[\"“”]', middle_name), NA, middle_name)) %>%
+  mutate(last_name = ifelse(grepl('[\"“”]', last_name), NA, last_name)) %>%
+  mutate(first_name = gsub('[\"“”]', '', first_name))
+
+# If last name is a suffix, the middle name was the last name
+# so move middle name value to last name
+house_generals$last_name <- 
+  ifelse(house_generals$last_name %in% c("JR", "SR", "II", "III", "IV"), 
+         house_generals$middle_name, house_generals$last_name)
+
+# Fill middle name with NA if middle name value got moved to last name
+house_generals$middle_name <-
+  ifelse(house_generals$middle_name == house_generals$last_name, NA, 
+         house_generals$middle_name)
+
+house_generals <- house_generals %>%
+  # Remove unnamed candidates
+  filter(!first_name %in% c("OTHER", "BLANK", "VOID", "OVER", "UNDERVOTES", "OVERVOTES",
+                            "VOTEFOREDDIECOM", "BLANKS", "ALL", "OTHERS", "SCATTERING",
+                            "SCATTER", "PRO-LIFE", "WRITE-IN", "MISCELLANEOUS", "WORKING",
+                            "INDEPENDENT", "EXHAUSTED", "MODERATE"))
+```
+
+```{r Manual Name Fixes HouseG}
+# Manual name fixes, according to Ballotpedia
+
+house_generals <- house_generals %>%
+ mutate(last_name = case_when(
+    first_name == "EDWARD" & middle_name == "A" & is.na(last_name) 
+    & suffix == "MAIDMENT" ~ "MAIDMENT",
+    first_name == "GEOFFREY" & middle_name == "M" & is.na(last_name) 
+    & suffix == "YOUNG" ~ "YOUNG",
+    first_name == "WILLIAM" & middle_name == "F" & is.na(last_name) 
+    & suffix == "POWERS" ~ "POWERS",
+    first_name == "JAMES" & middle_name == "G" & is.na(last_name) 
+    & suffix == "MYLES" ~ "MYLES",
+    first_name == "ROBERT" & middle_name == "C" & is.na(last_name) 
+    & suffix == "SCOTT" ~ "SCOTT",
+    first_name == "HERBERT" & middle_name == "C" & is.na(last_name) 
+    & suffix == "JONES, JR" ~ "JONES",
+    first_name == "CHARLES" & middle_name == "J" & is.na(last_name) 
+    & suffix == "FLEISCHMANN" ~ "FLEISCHMANN",
+    first_name == "MAX" & middle_name == "H" & last_name == "DELLA" 
+    & suffix == "PIA" ~ "DELLA PIA",
+    first_name == "GEORGE" & middle_name == "A" & last_name == "D" 
+    & suffix == "SANTOS" ~ "SANTOS",
+    first_name == "JESÚS" & middle_name == "G" & is.na(last_name) 
+    & suffix == "GARCÍA" ~ "GARCÍA",
+    first_name == "HENRY" & middle_name == "C" & is.na(last_name) 
+    & suffix == "JOHNSON, JR" ~ "JOHNSON",
+    first_name == "EARL" & middle_name == "L" & is.na(last_name) 
+    & suffix == "CARTER" ~ "CARTER",
+    first_name == "THEODORE" & is.na(middle_name) & is.na(last_name) 
+    & suffix == "MURRAY" ~ "MURRAY",
+    first_name == "G" & is.na(middle_name) & last_name == "A" ~ "PUDLO",
+    first_name == "MICHAEL" & middle_name == "J" & is.na(last_name) 
+    & suffix == "BARKLEY" ~ "BARKLEY",
+    first_name == "ERIC" & middle_name == "A" & is.na(last_name) 
+    & suffix == "CRAWFORD" ~ "CRAWFORD",
+    first_name == "DEBRA" & middle_name == "JO" & is.na(last_name) 
+    & suffix == "BORDEN" ~ "BORDEN",
+    first_name == "RICARDO" & middle_name == "DE" & last_name == "LA" 
+    & suffix == "FUENTE" ~ "DE LA FUENTE",
+    first_name == "MONICA" & middle_name == "DE" & last_name == "LA" 
+    & suffix == "CRUZ-HERNANDEZ" ~ "DE LA CRUZ",
+    first_name == "KYLE" & middle_name == "VAN" & last_name == "DE" 
+    & suffix == "WATER" ~ "VAN DE WATER",
+    first_name == "GERALD" & middle_name == "T" & last_name == "VAN" 
+    & suffix == "SICKLE" ~ "VAN SICKLE",
+    first_name == "MICHELLE" & middle_name == "DE" & last_name == "LA" 
+    & suffix == "ISLA" ~ "DE LA ISLA",
+    first_name == "GENERAL" & middle_name == "PARKER" & is.na(last_name) ~ "PARKER",
+    first_name == "DIANE" & middle_name == "E" & last_name == "MITSCH" 
+    & suffix == "BUSH" ~ "BUSH",
+    first_name == "JAMES" & middle_name == "E" & last_name == "JIM" 
+    & suffix == "CLYBURN" ~ "CLYBURN",
+    first_name == "EBERT" & middle_name == "G" & last_name == "BILL" 
+    & suffix == "BEEMAN" ~ "BEEMAN",
+    first_name == "VICKIE" & middle_name == "YATES" & last_name == "B" 
+    & suffix == "GLISSON" ~ "GLISSON",
+    first_name == "ANDREW" & middle_name == "VSEVOLOD" & last_name == "VON" 
+    & suffix == "SONN" ~ "VON SONN",
+    first_name == "WILLIAM" & middle_name == "MAVERICK" & last_name == "ST" 
+    & suffix == "CLAIRE" ~ "ST CLAIRE",
+    first_name == "C" & middle_name == "W" & last_name == "BILL" 
+    & suffix == "YOUNG" ~ "YOUNG",
+    first_name == "GLORIA" & last_name == "E" & suffix == "LA RIVA" ~ "LA RIVA",
+    first_name == "SAM" & middle_name == "S" & suffix == "CALIGIURI" ~ "CALIGIURI",
+    first_name == "C" & middle_name == "A" & last_name == "DUTCH" 
+    & suffix == "RUPPERSBERGER" ~ "RUPPERSBERGER",
+    first_name == "SEAN" & middle_name == "D" & suffix == "MIELAT" ~ "MIELAT",
+    first_name == "J" & middle_name == "MATTHEW" & suffix == "DE HEUS" ~ "DE HEUS",
+    first_name == "TRACELLA" & middle_name == "LOU" & suffix == "HILL" ~ "HILL",
+    first_name == "M" & middle_name == "E" & last_name == "MAC" 
+    & suffix == "MCCULLOUGH" ~ "MCCULLOUGH",
+    first_name == "WYNNE" & middle_name == "V" & last_name == "E" 
+    & suffix == "LEGROW" ~ "LEGROW",
+    first_name == "THOMAS" & middle_name == "S" & suffix == "PERRIELLO" ~ "PERRIELLO",
+    first_name == "JONATHAN" & middle_name == "TE" & suffix == "COURTNEY" ~ "COURTNEY",
+    first_name == "FRANK" & middle_name == "DELLA" & suffix == "VALLE" ~ "VALLE",
+    first_name == "NAN" & middle_name == "AS" & suffix == "HAYWORTH" ~ "HAYWORTH",
+    first_name == "BRIAN" & middle_name == "RYAN" & last_name == "B" 
+    & suffix == "DOYLE" ~ "DOYLE",
+    first_name == "HOWARD" & middle_name == "TERM" & last_name == "LIMITS" 
+    & suffix == "LAWSON" ~ "LAWSON",
+    first_name == "ROSEANN" & middle_name == "EHRHARD" & suffix == "WOFFORD" ~ "WOFFORD",
+    first_name == "NICHOLAS" & suffix == "DI IORIO" ~ "Di Iorio",
+    first_name == "ALAN" & middle_name == "J" & last_name == "K" 
+    & suffix == "YIM" ~ "YIM",
+    first_name == "KAREN" & middle_name == "FREE" & last_name == "SPIRIT" 
+    & suffix == "TALLEY-LANE" ~ "TALLEY-LANE",
+    TRUE ~ last_name)) %>%
+  mutate(middle_name = case_when(
+      first_name == "DIANE" & middle_name == "E" & last_name == "BUSH" ~ "MITSCH",
+      first_name == "JAMES" & middle_name == "E" & last_name == "CLYBURN" ~ "ENOS",
+      first_name == "C" & middle_name == "W" & last_name == "YOUNG" ~ "WILLIAM",
+      first_name == "SAM" & middle_name == "S" & last_name == "CALIGIURI" ~ "SF",
+      first_name == "TRACELLA" & middle_name == "LOU" & last_name == "HILL" ~ "LOU O'HARA",
+      first_name == "THOMAS" & middle_name == "S" & last_name == "PERRIELLO" ~ "SP",
+      first_name == "JONATHAN" & middle_name == "T" & last_name == "COURTNEY" ~ "TE",
+      first_name == "FRANK" & middle_name == "L" & last_name == "VALLE" ~ "DELLA",
+      first_name == "NAN" & middle_name == "A" & last_name == "HAYWORTH" ~ "AS",
+      first_name == "ROSEANN" & middle_name == "L" & last_name == "WOFFORD" ~ "EHRHARD",
+      first_name == "SEAN" & middle_name == "D" & last_name == "MIELAT" ~ "DM",
+      TRUE ~ middle_name)) %>%
+  mutate(first_name = case_when(
+    first_name == "C" & middle_name == "WILLIAM" & last_name == "YOUNG" ~ "CHARLES",
+    first_name == "C" & last_name == "RUPPERSBERGER" ~ "DUTCH",
+    first_name == "M" & middle_name == "E" & last_name == "MCCULLOUGH" ~ "MAC",
+    TRUE ~ first_name))
+
+# Set all suffix values to NA
+house_generals$suffix <- NA
+
+# Variable not needed for BISG
+house_generals <- house_generals %>%
+  select(-suffix)
+
+# Set all adjusted middle names to NA
+house_generals <- house_generals %>%
+  mutate(middle_name = case_when(
+      first_name == "KAREN" & middle_name == "FREE" & last_name == "TALLEY-LANE" ~ NA,
+      first_name == "ALAN" & middle_name == "J" & last_name ==  "YIM" ~ NA,
+      first_name == "HOWARD" & middle_name == "TERM" & last_name == "LAWSON" ~ NA,
+      first_name == "BRIAN" & middle_name == "RYAN" & last_name == "DOYLE" ~ NA,
+      first_name == "WYNNE" & middle_name == "V" & last_name == "LEGROW" ~ NA,
+      first_name == "MAC" & middle_name == "E" & last_name == "MCCULLOUGH" ~ NA,
+      first_name == "EBERT" & middle_name == "G" & last_name == "BEEMAN" ~ NA,
+      first_name == "GENERAL" & middle_name == "PARKER" & last_name == "PARKER" ~ NA,
+      first_name == "MICHELLE" & middle_name == "DE" & last_name == "DE LA ISLA" ~ NA,
+      first_name == "KYLE" & middle_name == "VAN" & last_name == "VAN DE WATER" ~ NA,
+      first_name == "MONICA" & middle_name == "DE" & last_name == "DE LA CRUZ" ~ NA,
+      first_name == "RICARDO" & middle_name == "DE" & last_name == "DE LA FUENTE" ~ NA,
+      first_name == "GEORGE" & middle_name == "A" & last_name == "SANTOS" ~ NA,
+      TRUE ~ middle_name))
+```
+
+```{r Organize HouseG}
+house_generals <- house_generals %>%
+ # Remove commas at end of string
+  mutate(middle_name = gsub(",\\s*$", "", middle_name)) %>%
+  mutate(last_name = gsub(",\\s*$", "", last_name)) %>%
+  # Remove redundant rows
+  distinct(year, district, last_name, first_name, .keep_all = TRUE)
+```
+
+```{r Election Results HouseG}
+# Calculate results
+
+house_generals <- house_generals %>%
+  # Calculate proportion of votes the candidate received
+  mutate(win_proportion = candidate_votes / total_votes) %>%
+  # Label all districts with their states so they are distinct
+   mutate(district = paste(state, district, sep = "_")) %>%
+  # Exclude candidates that received no votes
+   filter(candidate_votes != 0)
+
+plurality_states <- house_generals %>% 
+  # Exclude states without a plurality system 
+  filter(!state %in% c("AK", "ME", "GA", "LA")) %>% 
+  # Group into distinct contests
+  group_by(year, state, district) %>% 
+  # Designate a candidate a winner if they received the highest vote proportion
+  mutate(result = ifelse(win_proportion == max(win_proportion), "WON", "LOST")) %>%
+  # Remove grouping of distinct contests
+  ungroup()
+
+GA_LA <- house_generals %>%
+  # Filter to just Georgia and Louisiana
+  filter(state %in% c("GA", "LA")) %>%
+  # Group into distinct contests
+  group_by(year, state, district) %>%
+  mutate(
+     # Check if any candidate has more than 50%
+    result = if (any(win_proportion > 0.5)) {
+       # If a candidate gets more than 50% they win
+      ifelse(win_proportion > 0.5, "WON", "LOST")
+    } else {
+       # In  6 cases of no one getting over 50%, the max win_proportion won
+      ifelse(win_proportion == max(win_proportion), "WON", "LOST")}) %>%
+  # Remove grouping of distinct contests
+  ungroup()
+
+AK_ME <- house_generals %>%
+  # Filters to just Alaska and Maine
+  filter(state %in% c("AK", "ME")) %>%
+   # Groups into distinct contests
+  group_by(year, state, district) %>%
+  mutate(
+     # Check if any candidate has more than 50%
+    result = if (any(win_proportion > 0.5)) {
+       # If a candidate gets more than 50% they win
+      ifelse(win_proportion > 0.5, "WON", "LOST")
+    } else {
+      # In 3 cases of no one getting over 50%, the max win_proportion won
+      ifelse(win_proportion == max(win_proportion), "WON", "LOST")}) %>%
+  # Remove grouping of distinct contests
+  ungroup()
+  
+# Bind rows back together
+house_generals <- bind_rows(plurality_states, GA_LA, AK_ME)
+
+# Variables not needed anymore
+house_generals <- house_generals %>%
+  select(-c(candidate_votes, total_votes, win_proportion))
+```
+
+
+## House (Generals) BISG
+
+```{r Merge HouseG}
+# Merge full house dataset with matching dataset on state and district
+house <- left_join(house_generals, full_match, by = c("state", "district"))
+```
+
+```{r HouseG Prep}
+HBISG <- house %>%
+  # Grab relevant columns
+  select(county_fips, last_name, first_name, state, party) %>%
+  # Reassign values
+  mutate(party = case_when(
+    party == "DEMOCRAT" ~ "1",
+    party == "REPUBLICAN" ~ "2",
+    party == "OTHER" ~ "0")) %>%
+  # Remove white space
+  mutate(county_fips = str_trim(county_fips)) %>%
+  # Put leading zeros as needed
+  mutate(county_fips = ifelse(
+    is.na(county_fips), NA, 
+    sprintf("%03d", as.integer(county_fips)))) %>%
+  # Rename variables
+  rename(surname = last_name,
+         county = county_fips,
+         first = first_name) %>%
+  # Remove rows missing county or last name
+  filter(!is.na(county) & !is.na(surname)) %>%
+  # Remove redudancies
+  distinct()
+```
+
+```{r HouseG BISG}
+# Generate race predictions
+HBISG <- predict_race(
+  voter.file = HBISG,
+  census.surname = TRUE,
+  surname.only = FALSE,
+  names.to.use = "surname, first",
+  census.geo = "county",
+  census.key = Sys.getenv("CENSUS_API_KEY"),
+  party = "party",
+  year = "2010",
+  skip_bad_geos = TRUE) 
+```
+
+```{r Organize HouseG Race}
+RHBISG <- HBISG %>%
+  # Remove duplicates of candidates within counties
+  distinct(first, surname, county, state, .keep_all = TRUE) %>%
+  # Group by candidate
+  group_by(first, surname, state) %>%
+  # Compute the average race prediction of the candidate across all counties in the district
+  mutate(avg_white = mean(pred.whi),
+         avg_black = mean(pred.bla),
+         avg_his = mean(pred.his),
+         avg_asi = mean(pred.asi),
+         avg_other = mean(pred.oth)) %>%
+   # Assign candidate's race based on highest average
+    mutate(
+      race = case_when(
+      avg_white == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "white",
+      avg_black == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "black",
+      avg_his == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "hispanic",
+      avg_asi == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "asian",
+      avg_other == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "other")) 
+
+# Convert to data frame
+RHBISG <- as.data.frame(RHBISG)
+
+RHBISG <- RHBISG %>%
+  # Group by candidate
+   group_by(first, surname, state) %>%
+    mutate(
+      race = case_when(
+    # When the average white and Black estimates are close, there is at least a 0.3 average chance the candidate is Black, and the party is Democrat, flag as a check
+  abs(avg_white - avg_black) <= 0.2 & avg_black >= 0.3 & party == "1" ~ "check",
+  TRUE ~ race)) %>%
+  # Ungroup
+  ungroup() %>%
+  # Select relevant variables
+ select(surname, first, state, race) %>%
+  # Rename variables
+  rename(first_name = first,
+         last_name = surname) %>%
+  # Remove redundancies
+   distinct()
+```
+
+```{r Re-Merge HouseG}
+# Combine full house dataset with race predictions
+house_BISG <- left_join(house_generals, RHBISG, by = c("state", "last_name", "first_name"))
+```
+
+```{r Manual HouseG Race Cleaning}
+# Filling in "check" race, missing race, and missing names via manual online collection
+# Ballotpedia, BallotReady etc.
+# Denoting Middle Eastern candidates as Asian for manual collection
+
+house_BISG <- house_BISG %>%
+  mutate(last_name = case_when(
+    first_name == "HENRY" & district == "GA_4" ~ "JOHNSON",
+    first_name == "EARL" & district == "GA_1" ~ "CARTER",
+    first_name == "GEOFFREY" & district == "KY_6" ~ "YOUNG",
+    first_name == "WILLIAM" & district == "IN_1" ~ "POWERS",
+    first_name == "JAMES" & district == "VA_11" ~ "MYLES",
+    first_name == "ROBERT" & district == "VA_3" ~ "SCOTT",
+    first_name == "HERBERT" & district == "VA_1" ~ "JONES",
+    first_name == "CHARLES" & district == "TN_3" ~ "FLEISCHMANN",
+    first_name == "MICHAEL" & district == "CA_5" ~ "BARKLEY",
+    first_name == "DEBRA" & district == "AZ_5" ~ "BORDEN",
+    TRUE ~ last_name))
+
+house_BISG <- house_BISG %>%
+  mutate(race = case_when(
+    last_name == "MOORE" & first_name == "BARRY" ~ "white",
+    last_name == "ROGERS" & first_name == "MIKE" ~ "white",
+    last_name == "OMAR" ~ "black",
+    last_name == "SEWELL" ~ "black",
+    last_name == "GILES" ~ "white",
+    last_name == "EARLY" ~ "white",
+    last_name == "WALKER" & first_name == "KIMBERLY" ~ "black",
+    last_name == "ELLISON" & first_name == "ALLEN" ~ "black",
+    last_name == "MUCARSEL-POWELL" ~ "white",
+    last_name == "RUSH" ~ "black",
+    first_name == "PHILANISE" ~ "black",
+    last_name == "NEWMAN" ~ "white",
+    last_name == "ROWDER" ~ "white",
+    last_name == "CAMERON" ~ "black",
+    last_name == "SCHAKOWSKY" ~ "white",
+    last_name == "CARSON" & (first_name == "ANDRE" | first_name == "ANDRÉ") ~ "black",
+    last_name == "HARRIS" & last_name == "ANDY" ~ "white",
+    last_name == "BROWN" & first_name == "ANTHONY" ~ "black",
+    last_name == "JONES" & first_name == "JEFF" ~ "white",
+    last_name == "EASON" ~ "black",
+    last_name == "KELLY" & first_name == "TRENT" ~ "white",
+    last_name == "GUEST" ~ "white",
+    last_name == "GORDON" ~ "black",
+    last_name == "MALLIOTAKIS" ~ "white",
+    last_name == "MORRIS-PERRY" ~ "black",
+    last_name == "GWINN" ~ "hispanic",
+    last_name == "COBB" & first_name == "TEDRA" ~ "white",
+    last_name == "MATEMU" ~ "black",
+    last_name == "THOMAS" & first_name == "ROBERT" ~ "white",
+    last_name == "EVERETT" & first_name == "THERESA" ~ "black",
+    last_name == "TIMMONS-GOODSON" ~ "black",
+    last_name == "WALLACE" & first_name == "CYNTHIA" ~ "black",
+    last_name == "DAVIS" & first_name == "ANGELA" ~ "white",
+    last_name == "REED" & first_name == "ISAAC" ~ "white",
+    last_name == "ENOCH" ~ "black",
+    last_name == "GORE" & first_name == "LAVERNE" ~ "black",
+    last_name == "HARVEY" & first_name == "MICHAEL" ~ "black",
+    last_name == "NELSON" & first_name == "KIM" ~ "white",
+    last_name == "CHANDLER" & first_name == "MICHAEL" ~ "white",
+    last_name == "MCCOLLUM" ~ "white",
+    last_name == "HACKETT" ~ "white",
+    last_name == "RICE" & first_name == "TOM" ~ "white",
+    last_name == "CLARK" & first_name == "DENNIS" ~ "black",
+    last_name == "CRENSHAW" & first_name == "DAN" ~ "white",
+    last_name == "TAYLOR" & first_name == "VAN" ~ "white",
+    last_name == "JONES" & first_name == "TRACY" ~ "white",
+    last_name == "SALTER" ~ "white",
+    last_name == "HUNT" & first_name == "WESLEY" ~ "black",
+    last_name == "GRAY" & first_name == "PHIL" ~ "white",
+    last_name == "MCEACHIN" ~ "black",
+    last_name == "ANDREWS" & first_name == "ALISCIA" ~ "white",
+    last_name == "BOURDEAUX" ~ "white",
+    last_name == "SCOTT" & first_name == "AUSTIN" ~ "white",
+    last_name == "COOPER" & first_name == "JAMES" ~ "white",
+    last_name == "KEARNEY" ~ "white",
+    last_name == "VINCENT" ~ "white",
+    last_name == "GIBSON" ~ "white",
+    last_name == "GRAVES" ~ "white",
+    last_name == "PALMER" & first_name == "GARY" ~ "white",
+    last_name == "CARBAJAL" ~ "hispanic",
+    last_name == "LOWENTHAL" ~ "white",
+    last_name == "MCCORMICK" ~ "white",
+    last_name == "REALE" ~ "white",
+    last_name == "DUNN" ~ "white",
+    last_name == "MURPHY" & first_name == "STEPHANIE" ~ "asian",
+    last_name == "DEMINGS" ~ "black",
+    last_name == "COTTRELL" ~ "white",
+    last_name == "QUINN" ~ "white",
+    last_name == "COHN" ~ "white",
+    last_name == "SHALALA" ~ "white",
+    last_name == "GARCIA" ~ "hispanic",
+    last_name == "SCHNEIDER" ~ "white",
+    first_name == "GENERAL" ~ "black",
+    last_name == "COMER" ~ "white",
+    last_name == "TRONE" ~ "white",
+    last_name == "TRAHAN" ~ "white",
+    last_name == "MOULTON" ~ "white",
+    last_name == "PRESSLEY" ~ "black",
+    last_name == "LAWRENCE" & first_name == "JOHN" ~ "white",
+    last_name == "LAWRENCE" & first_name == "BRENDA" ~ "black",
+    last_name == "STEVENS" ~ "white",
+    last_name == "SINDT" ~ "white",
+    last_name == "PALAZZO" ~ "white",
+    last_name == "SMITH" & first_name == "JASON" ~ "white",
+    last_name == "STRAWDER" ~ "black",
+    last_name == "HORSFORD" ~ "black",
+    last_name == "KUSTER" ~ "white",
+    last_name == "NORCROSS" ~ "white",
+    last_name == "RUFO" ~ "white",
+    last_name == "ANABILAH-AZUMAH" ~ "black",
+    last_name == "NADLER" ~ "white",
+    last_name == "TONKO" ~ "white",
+    first_name == "ALMA" ~ "black",
+    last_name == "WENSTRUP" ~ "white",
+    last_name == "HORN" ~ "white",
+    last_name == "MEUSER" ~ "white",
+    last_name == "RESCHENTHALER" ~ "white",
+    last_name == "THOMPSON" & first_name == "GLENN" ~ "white",
+    last_name == "LAMB" ~ "white",
+    last_name == "TIMMONS" ~ "white",
+    last_name == "NORMAN" ~ "white",
+    last_name == "ROSE" ~ "white",
+    last_name == "FLETCHER" ~ "white",
+    last_name == "WEBER" ~ "white",
+    last_name == "ARRINGTON" ~ "white",
+    last_name == "BLUNT" & first_name == "JEFFREY" ~ "white",
+    last_name == "WILLIAMS" & first_name == "ERIC" ~ "black",
+    last_name == "ALLRED" ~ "black",
+    last_name == "VEASEY" ~ "black",
+    last_name == "CURTIS" ~ "white",
+    last_name == "CLINE" ~ "white",
+    last_name == "SPANBERGER" ~ "white",
+    last_name == "WEXTON" ~ "white",
+    last_name == "DELBENE" ~ "white",
+    last_name == "BRUBAKER" ~ "white",
+    last_name == "JOHNSON-GREEN" ~ "black",
+    last_name == "LOUDERMILK" ~ "white",
+    last_name == "DUGAS" ~ "white",
+    last_name == "RICHMOND" ~ "black",
+    last_name == "BAGWELL" ~ "white",
+    last_name == "CAMPBELL" & first_name == "MATTHEW" ~ "white",
+    last_name == "SHEETS" ~ "white",
+    last_name == "PERRY" & first_name == "JEFFREY" ~ "white",
+    first_name == "MARYANNE" ~ "white",
+    last_name == "NES" ~ "white",
+    last_name == "CLYDE" ~ "white", 
+    first_name == "HENRY" & last_name == "JOHNSON" ~ "black",
+    first_name == "EARL" & last_name == "CARTER" ~ "white",
+    last_name == "ABRAHAM" ~ "white",
+    last_name == "HICE" ~ "white",
+    last_name == "LEWIS" & first_name == "JOHN" ~ "black",
+    last_name == "BISHOP" & first_name == "SANFORD" ~ "black",
+    last_name == "ROGERS" & first_name == "DAVID" ~ "white",
+    last_name == "MOORE" & first_name == "BLAKE" ~ "white",
+    last_name == "MCFARLAND" ~ "white",
+    last_name == "SALINAS" ~ "white",
+    last_name == "ERICKSON" ~ "white",
+    last_name == "DELK" ~ "white",
+    last_name == "BICE" ~ "white",
+    first_name == "ALEXIS" & last_name == "JOHNSON" ~ "hispanic",
+    last_name == "RANKIN" ~ "white",
+    last_name == "BUCHANAN" ~ "white",
+    last_name == "RONNING" ~ "white",
+    last_name == "ROSENDALE" ~ "white",
+    last_name == "TRANEL" ~ "white",
+    last_name == "ZINKE" ~ "white",
+    first_name == "EDWARD" & is.na(last_name) ~ "white",
+    last_name == "MARTIN" & first_name == "HENRY" ~ "black",
+    first_name == "GEOFFREY" ~ "white",
+    last_name == "POWERS" ~ "white",
+    last_name == "PAGLINO" ~ "white",
+    last_name == "MYLES" ~ "white",
+    first_name == "ROBERT" & last_name == "SCOTT" ~ "black",
+    last_name == "DEJEAN" ~ "white",
+    last_name == "KLUSSMANN" ~ "white",
+    last_name == "TAYLOR" & first_name == "SHERRI" ~ "white",
+    last_name == "ROYAL" ~ "white",
+    last_name == "NEHLS" ~ "white",
+    last_name == "CLAYTOR" ~ "white",
+    last_name == "FLINN" ~ "white",
+    first_name == "HERBERT" & last_name == "JONES" ~ "black",
+    last_name == "FLEISCHMANN" ~ "white",
+    last_name == "SMUCKER" ~ "white",
+    last_name == "WILD" ~ "white",
+    last_name == "HOULAHAN" ~ "white",
+    first_name == "JEFF" & last_name == "JACKSON" ~ "white",
+    last_name == "HARRIGAN" ~ "white",
+    last_name == "MANNING" ~ "white",
+    last_name == "SANTOS" ~ "hispanic",
+    last_name == "JOHNSON" & first_name == "CYNTHIA" ~ "black",
+    last_name == "VELLUCCI" ~ "white",
+    last_name == "GUSTAFSON" ~ "white",
+    last_name == "OVERBY" ~ "white",
+    last_name == "MILLER" & first_name == "MARY" ~ "white",
+    first_name == "JESÚS" ~ "hispanic",
+    last_name == "SCHAFFER" ~ "white",
+    last_name == "ASENCIO" ~ "white",
+    last_name == "GIMENEZ" ~ "hispanic",
+    last_name == "BANYAI" ~ "white",
+    last_name == "CURNROW" ~ "white",
+    last_name == "KONIZ" ~ "white",
+    last_name == "LONG" ~ "white",
+    last_name == "WARD" & first_name == "RICHARD" ~ "white",
+    last_name == "WARD" & first_name == "ELLA" ~ "black",
+    last_name == "CARAVEO" ~ "hispanic",
+    last_name == "KIRKMEYER" ~ "white",
+    last_name == "CHEN" ~ "asian",
+    last_name == "BARKLEY" ~ "white",
+    first_name == "MONTE" ~ "black",
+    first_name == "ERIC" & district == "AR_1" ~ "white",
+    last_name == "BORDEN" ~ "white",
+    last_name == "CARL" ~ "white",
+    last_name == "DUFFY" ~ "white",
+    last_name == "MOORE" & first_name == "GWEN" ~ "black",
+    last_name == "CONNOLLY" ~ "white",
+    last_name == "BRAT" ~ "white",
+    last_name == "VELA" ~ "white",
+    last_name == "CARTER" & first_name == "JOHN" ~ "white",
+    last_name == "MARCHANT" ~ "white",
+    last_name == "CULBERSON" ~ "white",
+    last_name == "DEFAZIO" ~ "white",
+    last_name == "MCHENRY" ~ "white",
+    last_name == "PRICE" ~ "white",
+    last_name == "LUJAN" ~ "white",
+    last_name == "BERLINSKI" ~ "white",
+    last_name == "SHELL" ~ "white",
+    last_name == "CUNNINGHAM" ~ "white",
+    last_name == "DRISKELL" ~ "white",
+    last_name == "CUMMINGS" & first_name == "ELIJAH" ~ "black",
+    last_name == "MCDERMOTT" ~ "white",
+    last_name == "SARBANES" ~ "white",
+    last_name == "BUCSHON" ~ "white",
+    last_name == "BROOKS" & first_name == "SUSAN" ~ "white",
+    last_name == "SHIMKUS" ~ "white",
+    last_name == "LIPINSKI" ~ "white",
+    last_name == "KELLY" & first_name == "ROBIN" ~ "black",
+    last_name == "GRIFFIN" & first_name == "CALVIN" ~ "black",
+    last_name == "WILSON" & first_name == "FREDERICA" ~ "black",
+    last_name == "BILIRAKIS" ~ "white",
+    last_name == "STOCKHAM" ~ "black",
+    last_name == "LIEU" ~ "asian",
+    last_name == "WRIGHT" & first_name == "KENNETH" ~ "white",
+    last_name == "NAPOLITANO" ~ "hispanic",
+    last_name == "FAREED" ~ "white",
+    last_name == "NUNES" ~ "white",
+    last_name == "MATSUI" ~ "asian",
+    last_name == "GRIJALVA" ~ "hispanic",
+    last_name == "CURNOW" ~ "white",
+    last_name == "ADERHOLT" ~ "white",
+    last_name == "RYAN" & first_name == "PAUL" ~ "white",
+    last_name == "JENKINS" ~ "white",
+    last_name == "COMSTOCK" ~ "white",
+    last_name == "SIMONSEN" ~ "white",
+    last_name == "BALLARD" ~ "white",
+    last_name == "CORVALAN" ~ "white",
+    last_name == "MITCHELL" ~ "white",
+    last_name == "NOEM" ~ "white",
+    last_name == "MCCLELLAND" ~ "white",
+    last_name == "COSTELLO" ~ "white",
+    last_name == "WALKER" & first_name == "DAVID" ~ "white",
+    last_name == "KATKO" ~ "white",
+    last_name == "BELLONE" ~ "white",
+    last_name == "BAKARI" ~ "black",
+    last_name == "GERRARD" ~ "white",
+    last_name == "NOLAN" ~ "white",
+    last_name == "WIRTH" ~ "white",
+    last_name == "DELANEY" ~ "white",
+    last_name == "DOLD" ~ "white",
+    last_name == "HANABUSA" ~ "asian",
+    last_name == "YOHO" ~ "white",
+    last_name == "GESTY" ~ "white",
+    last_name == "SAVARY" ~ "white",
+    last_name == "TACHERRA" ~ "white",
+    last_name == "SMITH" & first_name == "JESSE" ~ "black",
+    last_name == "GALDO" ~ "white",
+    last_name == "MCALEER" ~ "white",
+    last_name == "ROBERTS" & first_name == "MARK" ~ "white",
+    last_name == "RAWLES" ~ "white",
+    last_name == "REYNOLDS" & first_name == "STEVEN" ~ "white",
+    last_name == "ELLMERS" ~ "white",
+    last_name == "HECK" ~ "white",
+    last_name == "MONCHIL" ~ "white",
+    last_name == "YOUNG" & first_name == "TODD" ~ "white",
+    last_name == "ESTY" & first_name == "ELIZABETH" ~ "white",
+    last_name == "STROUD" ~ "white",
+    last_name == "MIGLIETTA" ~ "white",
+    last_name == "TRIVEDI" ~ "white",
+    last_name == "ZALETEL" ~ "white",
+    last_name == "LITTLE" ~ "white",
+    last_name == "CHAPMAN" ~ "white",
+    last_name == "LANGKRAEHR" ~ "white",
+    last_name == "WUNSCH" ~ "white",
+    last_name == "MIRABILE" ~ "white",
+    first_name == "KAREN" & last_name == "BASS" ~ "black",
+    first_name == "CHARLES" & last_name == "BASS" ~ "white",
+    last_name == "DJOU" ~ "asian",
+    last_name == "SANDERS" & first_name == "RYAN" ~ "white",
+    last_name == "PLATTS" ~ "white",
+    last_name == "MONIGHAN" ~ "white",
+    last_name == "SPACE" ~ "white",
+    last_name == "SUTTON" ~ "white",
+    last_name == "GRAHAM" & first_name == "JIM" ~ "white",
+    last_name == "GRAHAM" & first_name == "CHARLES" ~ "other",
+    last_name == "TRAFICANT" ~ "white",
+    last_name == "ZELLER" ~ "white",
+    last_name == "ROWLAND" ~ "white",
+    last_name == "NACER" ~ "white",
+    last_name == "DWYER" ~ "white",
+    last_name == "STEELE" ~ "white",
+    last_name == "FURMAN" ~ "white",
+    last_name == "MORGAN" & first_name == "KERRY" ~ "white",
+    last_name == "SMITH" & first_name == "AIMEE" ~ "white",
+    last_name == "ZANOWIC" ~ "white",
+    last_name == "DAVIS" & first_name == "DANNY" ~ "black",
+    last_name == "MEEKS" ~ "black",
+    last_name == "LEE" & first_name == "BARBARA" ~ "black",
+    last_name == "CLEAVER" ~ "black",
+    last_name == "BEATTY" ~ "black",
+    last_name == "COLEMAN" & first_name == "BONNIE" ~ "black",
+    last_name == "UNDERWOOD" & first_name == "LAUREN" ~ "black",
+    last_name == "BUSH" & first_name == "CORI" ~ "black",
+    first_name == "RITCHIE" ~ "black",
+    last_name == "STRICKLAND" & first_name == "MARILYN" ~ "black",
+    first_name == "TROY" & last_name == "CARTER" ~ "black",
+    last_name == "CHERFILUS-MCCORMICK" ~ "black",
+    last_name == "FOUSHEE" ~ "black",
+    last_name == "FROST" ~ "black",
+    last_name == "IVEY" ~ "black",
+    last_name == "JACKSON" & first_name == "JONATHAN" ~ "black",
+    last_name == "KAMLAGER" ~ "black",
+    first_name == "SUMMER" ~ "black",
+    last_name == "HUFF" ~ "white",
+    last_name == "MCLENDON" ~ "white",
+    last_name == "LEBLANC" ~ "white",
+    last_name == "JOHNSON" & first_name == "ELIZABETH" ~ "black",
+    last_name == "COLLINS" ~ "white",
+    last_name == "CHRISTIAN" ~ "white",
+    last_name == "WEST" & first_name == "CHRIS" ~ "white",
+    last_name == "BURKETTE" ~ "white",
+    last_name == "ELLISON" & first_name == "GREG" ~ "white",
+    last_name == "ELLISON" & first_name == "KEITH" ~ "black",
+    last_name == "WILLIAMS" & first_name == "PETER" ~ "black",
+    last_name == "CLARK" & first_name == "NORMAN" ~ "white",
+    last_name == "CLAITOR" ~ "white",
+    last_name == "HOLLOWAY" ~ "white",
+    last_name == "MAYO" & first_name == "JAMIE" ~ "black",
+    last_name == "LANDRIEU" ~ "white",
+    last_name == "BROOKS" & first_name == "DAVID" ~ "white",
+    last_name == "BARROW" ~ "white",
+    last_name == "DIOUS" ~ "black",
+    last_name == "BROADY" ~ "black",
+    last_name == "TROTTER" ~ "white",
+    last_name == "KING" ~ "white",
+    last_name == "ANDERSON" & first_name == "LEE" ~ "white",
+    last_name == "GINGREY" ~ "white",
+    last_name == "KAZANOW" ~ "white",
+    last_name == "HOUSE" ~ "white",
+    last_name == "MCKINNEY" ~ "white",
+    last_name == "GINGREY" ~ "white",
+    last_name == "EDWARDS" & first_name == "RUSSELL" ~ "white",
+    last_name == "SAUNDERS" ~ "white",
+    last_name == "EZELL" ~ "white",
+    first_name == "DIANNE" & last_name == "BLACK" ~ "black",
+    last_name == "ROGERS" ~ "white",
+    last_name == "SCHAFRANEK" ~ "white",
+    last_name == "HENLEY" ~ "white",
+    last_name == "WILLIAMS" & first_name == "LYNNETTE" ~ "black",
+    last_name == "CHANDLER" ~ "white",
+    last_name == "CLARK" & first_name == "BEN" ~ "black",
+    last_name == "GASKINS" ~ "black",
+    last_name == "SAPASKIS" ~ "other",
+    last_name == "CHILDRESS" ~ "black",
+    last_name == "LUDDEN" ~ "white",
+    last_name == "PINCKNEY" ~ "black",
+    last_name == "ARMSTRONG" ~ "white",
+    last_name == "KUNIANSKY" ~ "white",
+    last_name == "ANTISELL" ~ "white",
+    last_name == "COLE" & first_name == "RONALD" ~ "black",
+    last_name == "COLE" & first_name == "TOM" ~ "white",
+    last_name == "AMBROSE" ~ "white",
+    last_name == "SANDERS" & first_name == "BRENDA" ~ "black",
+    last_name == "WILLIAMS" & first_name == "WHITTNEY" ~ "asian",
+    last_name == "PALMER" & first_name == "DONNIE" ~ "black",
+    last_name == "HARRIS" & first_name == "ANDY" ~ "white",
+    last_name == "KOPPIE" ~ "white",
+    last_name == "JONES" & first_name == "ART" ~ "white",
+    last_name == "PEKAU" ~ "white",
+    first_name == "BABETTE" ~ "black",
+    last_name == "NICHOLSON" ~ "white",
+    last_name == "RODGERS" & first_name == "JAMES" ~ "white",
+    last_name == "GREEN" & first_name == "KAREN" ~ "black",
+    last_name == "JONES" & first_name == "PAUL" ~ "white",
+    last_name == "GOODMAN" ~ "white",
+    last_name == "REALZ" ~ "white",
+    last_name == "REMREY" ~ "white",
+    first_name == "DESARAE" ~ "white",
+    last_name == "HARRIS" & first_name == "MARK" ~ "white",
+    last_name == "SCOTT" & first_name == "JEFF" ~ "white",
+    last_name == "MCNEILL" ~ "white",
+    last_name == "JONES" & first_name == "WALTER" ~ "white",
+    last_name == "ZENO" ~ "white",
+    last_name == "BARDEL" ~ "white",
+    last_name == "WHITE" & first_name == "JESSICA" ~ "white",
+    last_name == "COPELAND" ~ "black",
+    last_name == "FREDLAND" ~ "white",
+    last_name == "BISHOP" & first_name == "DAVE" ~ "white",
+    last_name == "LASHAR" ~ "white",
+    last_name == "MIMOUN" ~ "white",
+    last_name == "RUPPERSBERGER" ~ "white",
+    first_name == "JENICA" ~ "black",
+    last_name == "JONES" & first_name == "ARTHUR" ~ "white",
+    last_name == "TILLMAN" ~ "black",
+    last_name == "HUNTER" ~ "white",
+    last_name == "LIEBNITZKY" ~ "white",
+    last_name == "SELMONT" ~ "white",
+    last_name == "BASSILIAN" ~ "white",
+    last_name == "CANADA" ~ "white",
+    last_name == "PRESLEY" ~ "white",
+    last_name == "WADE" ~ "white",
+    last_name == "WILLIAMS" & first_name == "M" ~ "white",
+    last_name == "BROWN" & first_name == "SHAUN" ~ "black",
+    last_name == "WOODS" ~ "white",
+    last_name == "SMITH" & first_name == "DARREL" ~ "white",
+    last_name == "STERLING" ~ "white",
+    last_name == "FEDALEI" ~ "white",
+    last_name == "WILLIAMS" & first_name == "DEBORAH" ~ "white",
+    last_name == "WALKER" & first_name == "MARK" ~ "white",
+    first_name == "ERNEST" ~ "black",
+    last_name == "SPOTORNO" ~ "white",
+    last_name == "EVANS" & first_name == "ROBERT" ~ "white",
+    last_name == "ARDINI" ~ "white",
+    first_name == "DUWAYNE" ~ "black",
+    last_name == "BEECHWOOD" ~ "black",
+    last_name == "PATTERSON" ~ "white",
+    last_name == "PERRY" ~ "white",
+    last_name == "FREEMAN" ~ "white",
+    last_name == "DARTLAND" ~ "white",
+    last_name == "VARASTEH" ~ "white",
+    last_name == "BOYD" & first_name == "WILL" ~ "black",
+    last_name == "MATHIS" ~ "white",
+    last_name == "MCGEHEARTY" ~ "white",
+    last_name == "SHERRELL" ~ "white",
+    last_name == "ADAMS" & first_name == "TOM" ~ "white",
+    last_name == "THOMPSON" & first_name == "LINDA" ~ "white",
+    last_name == "BARFIELD" ~ "black",
+    last_name == "AIKEN" ~ "white",
+    last_name == "MAGEE" ~ "white",
+    last_name == "MCKENZIE" ~ "white",
+    last_name == "TILGHMAN" ~ "white",
+    last_name == "BRONSON" ~ "white",
+    last_name == "LAWRENCE" & first_name == "HENRY" ~ "black",
+    last_name == "ROBINSON" & first_name == "DAVE" ~ "black",
+    last_name == "SANDERS" & first_name == "KENNETH" ~ "black",
+    last_name == "KNOTT" ~ "white",
+    last_name == "DUMAS" ~ "black",
+    last_name == "WATT" ~ "black",
+    last_name == "MCINTYRE" ~ "white",
+    last_name == "GERMAN" ~ "black",
+    last_name == "VARASTEH" ~ "white",
+    last_name == "ROBINSON" & first_name == "JOHNNIE" ~ "black",
+    last_name == "HOLLEY" ~ "black",
+    last_name == "FORD" & first_name == "THERESE" ~ "white",
+    last_name == "HERRON" ~ "white",
+    last_name == "ROUSE" ~ "white",
+    last_name == "ETHERIDGE" ~ "white",
+    last_name == "BASCRELL" ~ "white",
+    last_name == "KLEINHENDLER" ~ "white",
+    last_name == "TAYLOR" & first_name == "GENE" ~ "white",
+    first_name == "STEPHENE" ~ "black",
+    last_name == "SCAKOWSKY" ~ "white",
+    last_name == "JUSTICE" ~ "white",
+    last_name == "BOYD" & first_name == "ALLEN" ~ "white",
+    last_name == "LUJAN" & first_name == "BEN" ~ "hispanic",
+    last_name == "HERGER" ~ "white",
+    last_name == "GIFFORDS" ~ "white",
+    last_name == "BONNER" ~ "white",
+    last_name == "ROBY" ~ "white",
+    last_name == "LEWIS" & first_name == "JERRY" ~ "white",
+    last_name == "CRENSHAW" ~ "white",
+    last_name == "MACK" ~ "white",
+    last_name == "SANSARICQ" ~ "other",
+    last_name == "ADAMS" & first_name == "SANDRA" ~ "white",
+    last_name == "RATOWITZ" ~ "white",
+    last_name == "UKRAINEC" ~ "white",
+    first_name == "HAROLD" ~ "white",
+    first_name == "JOE" & last_name == "WILSON" ~ "white",
+    last_name == "GOWDY" ~ "white",
+    last_name == "PRATT" ~ "white",
+    last_name == "JOHNSON" & first_name == "SAM" ~ "white",
+    first_name == "RON" & last_name == "PAUL" ~ "white",
+    last_name == "FAULK" ~ "white",
+    last_name == "COTTON" ~ "white",
+    last_name == "JENNERJAHN" ~ "white",
+    first_name == "CHRIS" & last_name == "EDWARDS" ~ "white",
+    last_name == "BRADLEY" ~ "white",
+    last_name == "WALLACE" ~ "white",
+    first_name == "ARTHUR" ~ "white",
+    last_name == "CULLER" ~ "white",
+    first_name == "KIMBERLIN" ~ "white",
+    last_name == "ANTHONY" & first_name == "CHARLES" ~ "white",
+    first_name == "RICHMOND" ~ "white",
+    last_name == "GOODEN" ~ "white",
+    first_name == "RON" & last_name == "WRIGHT" ~ "white",
+    last_name == "PATE" ~ "hispanic",
+    first_name == "NIKKA" ~ "asian",
+    last_name == "FLOWERS" & first_name == "BRIAN" ~ "white",
+    first_name == "SANDY" & last_name == "SMITH" ~ "white",
+    last_name == "HAYWOOD" ~ "white",
+    last_name == "TEAGUE" ~ "white",
+    last_name == "NICHOLS" ~ "white",
+    last_name == "FALAKOS" ~ "white",
+    last_name == "FORTE" ~ "white",
+    first_name == "RODNEY" ~ "white",
+    last_name == "STOPECK" ~ "white",
+    last_name == "TARPLEY" ~ "white",
+    last_name == "BROWN" & first_name == "HARRIS" ~ "white",
+    first_name == "LENAR" ~ "white",
+    last_name == "BELL" & first_name == "ROBERT" ~ "white",
+    last_name == "BELL" & first_name == "DOUGLAS" ~ "white",
+    last_name == "JOHNSON" & first_name == "MIKE" ~ "white",
+    last_name == "GUILLORY" & first_name == "JOSH" ~ "white",
+    last_name == "COLE" & first_name == "DON" ~ "white",
+    first_name == "LANCE" & last_name == "HARRIS" ~ "white",
+    last_name == "LETLOW" ~ "white",
+    last_name == "LEE" & first_name == "SHEILA" ~ "black",
+    last_name == "MINOR" & first_name == "LOUIE" ~ "hispanic",
+    last_name == "TIMS" & first_name == "DESIREE" ~ "black",
+    last_name == "FRANCIS" & first_name == "JIM" ~ "white",
+    last_name == "SCOTT" & first_name == "TIM" ~ "black",
+    last_name == "WEST" & first_name == "ALLEN" ~ "black",
+    last_name == "HURD" & first_name == "WILL" ~ "black",
+    last_name == "LOVE" ~ "black",
+    TRUE ~ race))
+```
+
+```{r HouseG Race Cleaning}
+# Identify race mismatches in BISG house generals dataset with hand collected primaries dataset
+
+# Select variables relevant to identifying mismatches
+houseg_past <- house_BISG %>%
+  select(last_name, first_name, district, race) %>%
+  mutate(race = toupper(race))
+
+race_comparisong <- houseg_past %>%
+  # Combine datasets by matching candidates
+  # Appends different suffixes to race columns to distinguish them
+  inner_join(housep2020, by = c("last_name", "first_name", "district"), suffix = c("_past", "_2020")) %>%
+  # Create a variable that identifies race mismatches
+  mutate(race_mismatch = race_past != race_2020) %>%
+  # Filter to mismatches
+  filter(race_mismatch) %>%
+  # Reduce to one row per candidate
+  distinct(first_name, last_name, district, .keep_all = TRUE)
+
+# Merge race comparison dataset back to full dataset
+house_BISG <- left_join(house_BISG, race_comparisong, by = c("last_name", "first_name", "district"))
+
+house_BISG <- house_BISG %>%
+  # If there's a race mismatch, the 2020 dataset is correct
+  mutate(race = ifelse(is.na(race_mismatch), race, 
+                       ifelse(race_mismatch, race_2020, race_past))) %>%
+  # Variables no longer needed
+  select(-c(race_past, race_2020, race_mismatch)) %>%
+  # Set to uppercase
+  mutate(race = toupper(race))
+```
+
+
+```{r}
+house <- read.csv("f: cleaned_house_generals.csv")
+house <- house[, -1]
+
+house <- house %>%
+  mutate(race = case_when(
+    last_name == "MCLEOD" ~ "hispanic",
+    last_name == "ROYBAL-ALLARD" ~ "white",
+    first_name == "MAXINE" ~ "black",
+    first_name == "AL" & last_name == "LAWSON" ~ "black",
+    first_name == "CORRINE" ~ "black",
+    last_name == "CONYERS" ~ "black",
+    last_name == "WILKINS" ~ "white",
+    last_name == "DICKEY" ~ "black",
+    last_name == "BLACK" & first_name == "PHIL" ~ "white",
+    last_name == "BRISCOE" ~ "white",
+    last_name == "WIGGINS" ~ "black",
+    last_name == "WESTBROOK" & first_name == "CORRY" ~ "white",
+    last_name == "MCNEIL" & first_name == "JOHN" ~ "black",
+    first_name == "DWIGHT" ~ "black",
+    last_name == "PERSON" ~ "white",
+    last_name == "HOBSON" ~ "black",
+    first_name == "JRMAR" ~ "black",
+    last_name == "EVANS" & first_name == "MICHAEL" ~ "white",
+    first_name == "JERAMEY" ~ "black",
+    last_name == "COLEMAN" & first_name == "LINDA" ~ "black",
+    last_name == "BROWN" & first_name == "BRANDON" ~ "black",
+    first_name == "ARCHIE" ~ "white",
+    last_name == "BELL" & first_name == "ADRIENNE" ~ "black",
+    last_name == "HARVEY-HALL" ~ "black",
+    last_name == "FARROW" ~ "black",
+    first_name == "RON" & last_name == "RICHARD" ~ "white",
+    first_name == "EDWIN" ~ "white",
+    last_name == "HARRIS" & first_name == "JAMES" ~ "white",
+    first_name == "MARSHALL" & last_name == "JONES" ~ "white",
+    last_name == "LAGARDE" ~ "white",
+    last_name == "SNOWDEN" ~ "black",
+    TRUE ~ race))
+
+house <- house %>%
+  mutate(race = toupper(race))
+
+# fBISG
+write.csv(house, "final: cleaned_house_generals.csv")
+
+house_primaries <- read.csv("f:cleaned_house_primaries.csv")
+house_primaries <- house_primaries[, -1]
+
+house_primaries <- house_primaries %>%
+  mutate(race = case_when(
+  first_name == "CORRINE" ~ "black",
+  last_name == "DICKEY" ~ "black",
+  last_name == "MCNEIL" & first_name == "JOHN" ~ "black",
+  first_name == "DWIGHT" ~ "black",
+  last_name == "HOBSON" ~ "black",
+  first_name == "JERAMEY" ~ "black",
+   last_name == "BROWN" & first_name == "BRANDON" ~ "black",
+  first_name == "ARCHIE" ~ "white",
+ TRUE ~ race))
+
+house_primaries <- house_primaries %>%
+  mutate(race = toupper(race))
+
+write.csv(house_primaries, "final: cleaned_house_primaries.csv")
+```
+
+
+```{r Save House Generals Dataset}
+# BISG
+write.csv(house_BISG, "cleaned_house_generals.csv")
+
+# fBISG
+write.csv(house, "f: cleaned_house_generals.csv")
+```
+
+
+
+# Cleaning Senate Candidates (Generals 2022-2024)
+
+Dataset citation for 2022-2024 data:
+Lempert, Julianne. 2024. “Senate General Elections 2022-2024 with Race and Gender.” doi:10.7910/DVN/0XKPYM.
+
+```{r Load Senate_22_24}
+# Read in 2022 & 2024 senate data
+sen_22_24 <- read.csv("senate_generals_2022_2024.csv")
+```
+
+```{r Organize Senate_22_24}
+sen_22_24 <- sen_22_24 %>%
+  # Match values to other senate dataset
+  mutate(special = case_when(
+    special == "NO" ~ "False",
+    special == "YES" ~ "True"))
+```
+
+## Cleaning Senate Candidates (Generals)
+
+Dataset citation:
+MIT Election Data And Science Lab. 2017. “U.S. Senate Statewide 1976–2020.
+doi:10.7910/DVN/PEJ5QU.
+
+```{r Load Senate}
+# Read in senate data
+senate_generals <- read.csv("senate_generals through 2020.csv")
+```
+
+```{r Organize Senate}
+# Subset to case years
+senate_generals <- senate_generals %>%
+  filter(year >= 2010) %>%
+# Remove irrelevant variables or columns with only one value
+  select(-c(state, state_cen, state_ic, office, district, party_detailed, unofficial, version, writein, state_fips, mode)) %>%
+  # Turn empty cells to NAs
+  mutate(candidate = na_if(str_trim(candidate), "")) %>%
+# Remove rows with no candidate name
+    filter(!is.na(candidate)) %>%
+# Any party besides Democrat or Republican gets called Other
+   mutate(party_simplified = ifelse(party_simplified == "DEMOCRAT" | party_simplified == "REPUBLICAN", party_simplified, "OTHER")) %>%
+# Rename variables
+  rename(state = state_po, candidate_votes = candidatevotes, total_votes = totalvotes, party = party_simplified)
+```
+
+```{r Name Cleaning Senate}
+senate_generals <- senate_generals %>%
+# Removes meaningless values
+# "MA" is candidate with just first name and 18 votes
+  filter(!candidate %in% c("BLANK VOTE/SCATTERING", "SCATTER", "OTHER", "OVER VOTE", "BLANK VOTE", "OTHERS", "OVER VOTES", "UNDER VOTES", "BLANK VOTES","VOID VOTE", "NONE OF THESE CANDIDATES", "OTHER CANDIDATES", "BLANK VOTE/VOID VOTE/SCATTERING", "NONE OF THE ABOVE", "MA")) %>%
+# Removes the word in quotes along with the quotes
+  mutate(candidate = gsub('[\"“”][^\"“”]+[\"“”]', '', candidate)) %>%
+# Separates candidate names 
+  separate(candidate, into = c("first_name", "middle_name", "last_name", "suffix"), sep = " ", extra = "merge", fill = "right") %>%
+    mutate(middle_name = ifelse(trimws(middle_name) == "", NA, middle_name))
+  
+# If nothing was put in last_name, the second name was the last name so move middle_name value to last_name
+senate_generals$last_name <- 
+  ifelse(is.na(senate_generals$last_name), senate_generals$middle_name, senate_generals$last_name)
+
+# Fill middle_name with NA if middle_name value got moved to last_name
+senate_generals$middle_name <-
+  ifelse(senate_generals$middle_name == senate_generals$last_name, NA, senate_generals$middle_name)
+
+senate_generals <- senate_generals %>%
+  # Manual error fixes
+  mutate(last_name = case_when(
+    first_name == "NIMROD" ~ "ALLEN",
+    suffix == "GALAN" ~ "GALAN",
+    suffix == "SPEARS" ~ "LANE",
+    suffix == "LAFARGUE" ~ "G",
+    suffix == "LAND, JR." ~ "ROBERT",
+    middle_name == "MANCHIN" ~ "MANCHIN",
+    suffix == "OBERWEIS" ~ "OBERWEIS",
+    middle_name == "EMERSON" ~ "EMERSON",
+    suffix == "GIUFFRE" ~ "GIUFFRE",
+    last_name == "JR." & first_name == "GREGORY" ~ "TAYLOR",
+    middle_name == "LOVE" ~ "LOVE",
+    middle_name == "DE" ~ "DE LEON",
+    first_name == "ROBERT" & state == "NJ" & year == 2018 ~ "MENENDEZ",
+    TRUE ~ last_name)) %>%
+  mutate(first_name = case_when(
+    last_name == "GALAN" ~ "SKIP",
+    last_name == "MELANCON" ~ "CHARLIE",
+    TRUE ~ first_name)) %>%
+  mut-ate(middle_name = case_when(
+    last_name == "MANCHIN" ~ NA,
+    suffix == "SPEARS" ~ NA,
+    suffix == "LAFARGUE" ~ NA,
+    suffix == "LAND, JR." ~ NA, 
+    middle_name == "EMERSON" ~ NA,
+    first_name == "GREGORY" & last_name == "TAYLOR" ~ NA,
+    last_name == "LOVE" ~ NA,
+    last_name == "DE LEON" ~ NA,
+    last_name == "HORNING" ~ NA,
+    last_name == "TURKAVAGE" ~ NA,
+    last_name == "SONI" ~ NA,
+    TRUE ~ middle_name)) %>%
+  # Remove suffix, not needed for BISG
+  select(-suffix) %>%
+  # Remove period at the end of one letter middle names 
+   mutate(middle_name = gsub('\\.$', '', middle_name)) %>%
+  # Remove period at the end of one letter first names 
+   mutate(first_name = gsub('\\.$', '', first_name)) %>%
+  # Remove period at the end of one letter last names 
+   mutate(last_name = gsub('\\.$', '', last_name)) %>%
+  # Remove comma at end
+  mutate(last_name = gsub(",\\s*$", "", last_name)) %>%
+  # Replace empty strings with NA
+  mutate(across(everything(), ~ replace(., . == "", NA))) %>%
+  # Remove redundant candidates within an election
+  distinct(first_name, middle_name, last_name, year, state, .keep_all = TRUE)
+```
+
+```{r Election Results Senate}
+# Results calculation
+
+senate_generals <- senate_generals %>%
+  # Excludes candidates that received no votes
+   filter(candidate_votes != 0) %>%
+  # Calculates proportion of votes the candidate received
+  mutate(win_proportion = candidate_votes / total_votes)
+
+plurality_states <- senate_generals %>% 
+  # Excludes states without a plurality system 
+  filter(!state %in% c("AK", "ME", "GA", "LA")) %>% 
+  # Groups into distinct contests
+  group_by(year, state) %>% 
+  # Designates a candidate a winner if they received the highest vote proportion
+  mutate(result = ifelse(win_proportion == max(win_proportion), "WINNER", "LOSER")) %>%
+  ungroup()
+
+GA_LA <- senate_generals %>%
+  filter(state %in% c("GA", "LA")) %>%
+  # Groups into distinct contests
+  group_by(year, state) %>%
+  mutate(
+     # Check if any candidate has more than 50%
+    result = if (any(win_proportion > 0.5)) {
+       # If a candidate gets more than 50% they win
+      ifelse(win_proportion > 0.5, "WINNER", "LOSER")
+    } else {
+       # In all 6 cases of no one getting over 50% of the votes, the max win_proportion won
+      ifelse(win_proportion == max(win_proportion), "WINNER", "LOSER")}) %>%
+  ungroup()
+
+AK_ME <- senate_generals %>%
+  filter(state %in% c("AK", "ME")) %>%
+   # Groups into distinct contests
+  group_by(year, state) %>%
+  mutate(
+     # Check if any candidate has more than 50%
+    result = if (any(win_proportion > 0.5)) {
+       # If a candidate gets more than 50% they win
+      ifelse(win_proportion > 0.5, "WINNER", "LOSER")
+    } else {
+      # In all 3 cases of no one getting over 50% of the votes, the max win_proportion won
+      ifelse(win_proportion == max(win_proportion), "WINNER", "LOSER")}) %>%
+  ungroup()
+```
+
+```{r Result Fixing Senate}
+# Manual fixes to results
+
+# Plurality state fixes
+plurality_states <- plurality_states %>%
+  mutate(result = case_when(
+    last_name == "LONG" & first_name == "WENDY" ~ "LOSER",
+    last_name == "GILLIBRAND" ~ "WINNER",
+    last_name == "LANKFORD" ~ "WINNER",
+    last_name == "GRAHAM" ~ "WINNER",
+    TRUE ~ result))
+
+# GA and LA state fixes
+GA_LA <- GA_LA %>%
+  filter(state != "runoff") %>%
+  # Removing 2020 GA runoff, designating Warnock & Ossoff as election winners
+  mutate(result = case_when(
+    last_name == "WARNOCK" ~ "WINNER",
+    last_name == "OSSOFF" ~ "WINNER",
+    last_name == "PERDUE" & year == 2020 ~ "LOSER",
+    TRUE ~ result)) %>%
+  mutate(first_name = case_when(
+    last_name == "CASSIDY" ~ "BILL",
+    TRUE ~ first_name))
+
+# Bind back results
+senate_generals <- bind_rows(plurality_states, GA_LA, AK_ME)
+
+senate_generals <- senate_generals %>%
+   # Party errors
+  mutate(party = case_when(
+    last_name == "GILLIBRAND" ~ "DEMOCRAT",
+    last_name == "MURKOWSKI" ~ "REPUBLICAN",
+    TRUE ~ party)) %>%
+  # Variables not needed anymore
+  select(-c(candidate_votes, total_votes, win_proportion)) %>%
+   # Removes question marks from middle names
+  mutate(middle_name = gsub("\\?", "", middle_name))
+```
+
+## Senate BISG
+
+```{r Fips Merge Senate}
+# Merge senate dataset with matching dataset on state
+senate <- left_join(senate_generals, full_match, by = c("state"))
+# Remove redudant rows
+senate <- senate %>%
+  distinct(year, state, first_name, last_name, party, county_fips, .keep_all = TRUE)
+```
+
+```{r Prep Senate}
+# Prep dataset for BISG
+SBISG <- senate %>%
+  # Grab relevant columns
+  select(county_fips, last_name, first_name, middle_name, state, party) %>%
+  # Reassign values for BISG
+  mutate(party = case_when(
+    party == "DEMOCRAT" ~ "1",
+    party == "REPUBLICAN" ~ "2",
+    party == "OTHER" ~ "0")) %>%
+  # Remove white space
+  mutate(county_fips = str_trim(county_fips)) %>%
+  # Put leading zeros as needed
+  mutate(county_fips = ifelse(
+    is.na(county_fips), NA, 
+    sprintf("%03d", as.integer(county_fips)))) %>%
+  # Rename variables for BISG
+  rename(surname = last_name,
+         county = county_fips,
+         first = first_name,
+         middle = middle_name) %>%
+  # Remove rows with missing county or last name
+  filter(!is.na(county) & !is.na(surname)) %>%
+  # Remove duplicates made in matching
+  distinct()
+```
+
+```{r Senate BISG}
+# Run BISG
+SBISG <- predict_race(
+  voter.file = SBISG,
+  census.surname = TRUE,
+  surname.only = FALSE,
+  names.to.use = "surname, first, middle",
+  census.geo = "county",
+  census.key = Sys.getenv("CENSUS_API_KEY"),
+  party = "party",
+  year = "2010",
+  skip_bad_geos = TRUE) 
+```
+
+```{r Organize Senate Race}
+RSBISG <- SBISG %>%
+  # Remove duplicates of candidates within counties
+  distinct(first, surname, county, state, .keep_all = TRUE) %>%
+  # Group by candidate
+  group_by(first, surname, state) %>%
+  # Compute the average race prediction of the candidate across all counties in the state
+  mutate(avg_white = mean(pred.whi),
+         avg_black = mean(pred.bla),
+         avg_his = mean(pred.his),
+         avg_asi = mean(pred.asi),
+         avg_other = mean(pred.oth)) %>%
+  # Assign candidate's race based on highest average 
+  mutate(
+      race = case_when(
+      avg_white == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "white",
+      avg_black == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "black",
+      avg_his == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "hispanic",
+      avg_asi == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "asian",
+      avg_other == max(avg_white, avg_black, avg_his, avg_asi, avg_other) ~ "other")) 
+
+# Convert to dataframe
+RSBISG <- as.data.frame(RSBISG)
+
+RSBISG <- RSBISG %>%
+  # Group by candidate
+   group_by(first, surname, middle, state) %>%
+    mutate(
+      # When the average white and Black estimates are close, there is at least a 0.3 average chance the candidate is Black, and the party is Democrat, flag as a check
+      race = case_when(
+  abs(avg_white - avg_black) <= 0.2 & avg_black >= 0.3 & party == "1" ~ "check",
+  TRUE ~ race)) %>%
+  # Remove grouping
+    ungroup() %>%
+  # Select relevant columns
+   select(surname, first, state, middle, race) %>%
+  # Rename variables
+   rename(first_name = first,
+         last_name = surname,
+         middle_name = middle) %>%
+  # Remove redundancies
+    distinct()
+```
+
+```{r Re-Merge Senate}
+# Merge with full senate candidate dataset
+senate_BISG <- left_join(senate_generals, RSBISG, by = c("state", "last_name", "first_name"))
+
+senate_BISG <- senate_BISG %>%
+  # Remove extra column
+  select(-middle_name.y) %>%
+  # Rename variable
+  rename(middle_name = middle_name.x)
+```
+
+```{r Manual Senate Race Cleaning}
+# Filling in "check" race or missing race via manual online collection
+# Ballotpedia, BallotReady etc.
+# Denoting Middle Eastern candidates as Asian for manual collection
+
+senate_BISG <- senate_BISG %>%
+  mutate(race = case_when(
+    last_name == "JONES" ~ "white",
+    last_name == "WILSON" & first_name == "WILLIE" ~ "black",
+    last_name == "BOOKER" ~ "black",
+    last_name == "BRADSHAW" ~ "black",
+    last_name == "JOHNSON" & middle_name == "WAYNE" ~ "white",
+    last_name == "TAYLOR" & first_name == "KANDISS" ~ "white",
+    last_name == "DARET" ~ "white",
+    last_name == "JOHN" ~ "white",
+    last_name == "CUNNINGHAM" ~ "white",
+    last_name == "BARTELL" ~ "black",
+    last_name == "FORTUIN" ~ "white",
+    last_name == "WINFIELD" ~ "white",
+    last_name == "HARRISON" ~ "black",
+    last_name == "GROSS" ~ "white",
+    middle_name == "MALOUF" ~ "white",
+    last_name == "PETERS" ~ "white",
+    middle_name == "INHOFE" ~ "white",
+    last_name == "MURPHY" ~ "white",
+    last_name == "COLLINS" ~ "white",
+    last_name == "KING" ~ "white",
+    last_name == "CLEMENTS" ~ "white",
+    middle_name == "ROBERT" ~ "white",
+    first_name == "THOMAS" & middle_name == "G" ~ "white",
+    last_name == "HEINRICH" ~ "white",
+    last_name == "BRENTON" ~ "white",
+    last_name == "THUNE" ~ "white",
+    first_name == "JOHN" & middle_name == "M" ~ "white",
+    first_name == "JAMES" & middle_name == "D" ~ "white",
+    last_name == "LANDRIEU" ~ "white",
+    first_name == "KAMALA" ~ "black",
+    last_name == "WILLIAMS" & first_name == "PETER" ~ "black",
+    last_name == "THURMOND" ~ "black",
+    last_name == "ESPY" ~ "black",
+    last_name == "DIXON" & first_name == "THOMAS" ~ "black",
+    last_name == "MARSHALL" & first_name == "ELAINE" ~ "white",
+    TRUE ~ race))
+
+senate_BISG <- senate_BISG %>%
+  # These are candidates lacking sufficient identification so must be dropped
+  # This is done so by removing candidates missing race
+  filter(!is.na(race)) %>%
+  mutate(incumbent = NA,
+         gender = NA)
+senate_BISG %>%
+  filter(is.na(race))
+```
+
+```{r Senate Race Cleaning}
+# Identify race mismatches in BISG senate generals dataset with hand collected 2022-2024 senate dataset
+
+# Select variables relevant to identifying mismatches
+senate_past <- senate_BISG %>%
+  select(last_name, first_name, state, race) %>%
+  mutate(race = toupper(race))
+senate_hand <- sen_22_24 %>%
+  select(last_name, first_name, state, race)
+
+srace_comparison <- senate_past %>%
+  # Combine datasets by matching candidates
+  # Appends different suffixes to race columns to distinguish them
+  inner_join(senate_hand, by = c("last_name", "first_name", "state"), suffix = c("_past", "_22_24")) %>%
+  # Create a variable that identifies race mismatches
+  mutate(race_mismatch = race_past != race_22_24) %>%
+  # Filter to mismatches
+  filter(race_mismatch) %>%
+  # Reduce to one row per candidate
+  distinct(first_name, last_name, state, .keep_all = TRUE)
+
+# Merge race comparison dataset back to full dataset
+senate_BISG <- left_join(senate_BISG, srace_comparison, by = c("last_name", "first_name", "state"))
+
+senate_BISG <- senate_BISG %>%
+  # If there's a race mismatch, the 2020 dataset is correct
+  mutate(race = ifelse(is.na(race_mismatch), race, 
+                       ifelse(race_mismatch, race_22_24, race_past))) %>%
+  # Variables no longer needed
+  select(-c(race_past, race_22_24, race_mismatch)) %>%
+  # Set to uppercase
+  mutate(race = toupper(race))
+```
+
+```{r Bind Senate}
+# All columns match up in order
+# sen_20_24 has additional columns
+senate_BISG <- bind_rows(senate_BISG, sen_22_24)
+senate_BISG <- senate_BISG %>%
+  mutate(race = toupper(race))
+```
+
+```{r Save Senate Dataset}
+write.csv(senate_BISG, "cleaned_senate.csv")
+```
+
+
+
+
+
+
+
+
+
