@@ -12,6 +12,8 @@ Protest data:
 Chenoweth, Erica, Soha Hammam, and Jay Ulfelder. 2024. “Crowd Counting Consortium.” Ash 
 Center. https://ash.harvard.edu/programs/crowd-counting-consortium/.
 
+Specific dataset generously curated by the authors.
+
 ```{r}
 # Load data
 protests <- read.csv("ccc-antiracism-2020.csv")
