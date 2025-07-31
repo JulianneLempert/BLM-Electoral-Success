@@ -731,11 +731,13 @@ RSlegBISG <- RSlegBISG %>%
    distinct(first_name, last_name, state, middle_name, .keep_all = TRUE)
 ```
 
-```{r Re-Merge Sleg}
+```{r Re-Merge Sleg and finish cleaning}
 # Merge with full state legislature dataset
 sleg_BISG <- left_join(sleg, RSlegBISG, by = c("state", "last_name", "first_name"))
 sleg_BISG <- sleg_BISG %>%
-  distinct(cand_id, year, .keep_all = TRUE)
+  distinct(cand_id, year, .keep_all = TRUE) %>%
+  filter(election_type == "general") %>%
+  filter (year <= 2020)
 ```
 
 
