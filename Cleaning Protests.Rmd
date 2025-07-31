@@ -102,7 +102,21 @@ protests <- protests %>%
   # Note that there are 9 cases of no county or locality value, but a state value
   filter(!is.na(county) & !is.na(locality) & !is.na(state)) %>%
   # Fill in missing fips value for Oakland County, Michigan
-  mutate(fips = ifelse(county == "oakland" & state == "MI", "125", fips))
+  mutate(fips = ifelse(county == "oakland" & state == "MI", "125", fips) %>%
+  # Establish mean size for each unit of location
+  group_by(state, locality) %>%
+  mutate(local_mean = mean(size, na.rm = TRUE)) %>%
+  ungroup() %>%
+  group_by(state) %>%
+  mutate(state_mean = mean(size, na.rm = TRUE)) %>%
+  ungroup() %>%
+  # Assign the average size value of the jurisdiction to values missing size
+  # If all values within a city or county are missing, assign the state mean
+  mutate(size = ifelse(is.na(size), 
+                       ifelse(is.nan(local_mean), state_mean, local_mean), 
+                       size)) %>%
+  # Variables no longer needed
+  select(-local_mean, -state_mean)
 ```
 
 County-level protests:
