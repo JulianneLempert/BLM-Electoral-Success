@@ -1057,12 +1057,13 @@ ggplot(df_even_years_sleg, aes(x = year, y = count, color = category, group = ca
 ```
 
 ```{r, include=FALSE}
-protest2 <- read.csv("cleaned_full_protests2.csv")
-protest2$log_size <- log(protest2$size)
+protests <- read.csv("cleaned_full_protests.csv")
+protests$log_size <- log(protests$size)
 ```
 
 ```{r, echo=FALSE}
-ggplot(protest2, aes(x = log_size)) +
+# Descriptive plot of protest size for full protest dataset
+ggplot(protests, aes(x = log_size)) +
   geom_density(color = "#77A88B", size = 1.2) +
   labs(
     title = "Logged Protest Size",
@@ -1078,6 +1079,7 @@ ggplot(protest2, aes(x = log_size)) +
     axis.title.y = element_text(margin = margin(r = 13))) +
     scale_x_continuous(breaks = seq(0, 12, by = 2))
 
+# Descriptive plot of participant injuries per state (that have 2020 Senate elections)
 ggplot(senate_protest_2020, aes(x = injuries_crowd)) +
   geom_density(color = "#77A88B", size = 1.2) +
    labs(
@@ -1094,6 +1096,7 @@ ggplot(senate_protest_2020, aes(x = injuries_crowd)) +
     axis.title.y = element_text(margin = margin(r = 13))) +
   scale_x_continuous(breaks = seq(0, 40, by = 5))
 
+# Descriptive plot of protest frequency per congressional district
 ggplot(house_protest_2020, aes(x = frequency)) +
   geom_density(color = "#77A88B", size = 1.2) +
     labs(
@@ -1112,6 +1115,7 @@ ggplot(house_protest_2020, aes(x = frequency)) +
 ```
 
 ```{r, echo=FALSE}
+# Set the following seed for reproducibility
 set.seed(650)
 model <- glm(black_dem_winner ~ log_size + black_dem_winners_prior, 
              data = house_protest_2020, 
@@ -1124,6 +1128,7 @@ pred_data <- data.frame(log_size = size_seq,
                         black_dem_winners_prior = mean_black_dem_winners_prior)
 pred_data$predicted_prob <- predict(model, newdata = pred_data, type = "response")
 
+# Logistic regression plot: Effect of Size on Black Democrats in House General Elections
 ggplot(house_protest_2020, aes(x = log_size, y = black_dem_winner)) +
   geom_jitter(height = 0.05, width = 0.2, alpha = 0.2, color = "#00AEF3") + 
   geom_line(data = pred_data, aes(x = log_size, y = predicted_prob), 
@@ -1142,6 +1147,7 @@ ggplot(house_protest_2020, aes(x = log_size, y = black_dem_winner)) +
     axis.title.y = element_text(margin = margin(r = 13)))
 ```
 
+# Logistic regression plot: Effect of Frequency on Black Republicans in House Primary Elections
 ```{r, echo=FALSE}
 model <- glm(black_rep_winner ~ frequency + black_rep_winners_prior, 
              data = housep_protest_2020, 
@@ -1173,6 +1179,7 @@ ggplot(housep_protest_2020, aes(x = frequency, y = black_rep_winner)) +
 ```
 
 ```{r, echo=FALSE}
+# Logistic regression plot: Effect of Crowd Injuries on Black Candidates in City Elections
 model <- glm(black_winner ~ injuries_crowd + black_winners_prior, 
              data = place_protest_2020, 
              family = binomial)
@@ -1203,6 +1210,7 @@ scale_x_continuous(breaks = seq(0, 100, by = 10))
 ```
 
 ```{r}
+# Predicted probabilities chart: Predicted Probability of a Black Democratic Winner in the State Legislature
 model3 <- glm(black_dem_winner ~ log_size + black_dem_winners_prior, 
              data = sleg_protest_2020, 
              family = binomial)
@@ -1231,6 +1239,7 @@ model4 <- glm(black_rep_winner ~ log_arrests + black_rep_winners_prior,
              family = binomial)
 marg_effects <- ggpredict(model4, terms = "log_arrests [all]")
 
+# Predicted probabilities chart: Predicted Probability of a Black Republican Winner in the State Legislature
 ggplot(marg_effects, aes(x = x, y = predicted)) +
   geom_line(size = 1.2, color = "#E81B23") +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "#E81B23") +
@@ -1254,6 +1263,7 @@ model5 <- glm(black_winner ~ frequency + black_winners_prior,
              family = binomial)
 marg_effects <- ggpredict(model5, terms = "frequency [all]")
 
+# Predicted probability plot: Predicted Probability of a Black Winner in House General Elections
 ggplot(marg_effects, aes(x = x, y = predicted)) +
   geom_line(size = 1.2, color = "#9E0DF2") +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "#9E0DF2") +
