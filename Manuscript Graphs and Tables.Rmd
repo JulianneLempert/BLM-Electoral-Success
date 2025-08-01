@@ -1,0 +1,1276 @@
+---
+title: "Manuscript Graphs and Tables"
+author: "Julianne Lempert"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+  - \usepackage{lscape}
+---
+
+```{r, include=FALSE}
+# Load libraries
+library(tidyverse)
+library(stargazer)
+library(texreg)
+library(scales)
+library(extrafont)
+library(ggeffects)
+``` 
+
+```{r}
+# Set seed for geom_jitter plots
+set.seed(650)
+```
+
+```{r Custom Colors, include=FALSE}
+# Set custom colors for graphs
+custom_colors3 <- c("d_percent" = "#00AEF3", "r_percent" = "#E81B23")
+custom_colors6 <- c("dem_candidates" = "#00AEF3", "dem_winners" = "#B3E8FD", "rep_candidates" = "#E81B23", "rep_winners" = "#F38D91")
+```
+
+```{r, include=FALSE}
+# Read in datasets
+senate <- read.csv("cleaned_senate.csv")
+senate <- senate[, -1]
+senate_protests <- read.csv("cleaned_senate_protests2.csv")
+senate_protests <- senate_protests[, -1]
+```
+
+```{r, include=FALSE}
+historical_senate <- senate %>%
+  group_by(state, year) %>%
+  summarize(
+    # Create binary outcome values
+    black_winner = as.integer(any(race == "BLACK" & result == "WINNER")),
+    black_dem_winner = as.integer(any(race == "BLACK" & result == "WINNER" & party == "DEMOCRAT")),
+    black_rep_winner = as.integer(any(race == "BLACK" & result == "WINNER" & party == "REPUBLICAN"))) %>%
+  distinct(state, year, .keep_all = TRUE)
+
+# Construct pre-2020 averages
+senate_averages <- historical_senate %>%
+    filter(year != 2020) %>%
+  group_by(state) %>%
+  summarize(
+    # Calculate average electoral success
+    black_winners_prior = mean(black_winner),
+    black_dem_winners_prior = mean(black_dem_winner),
+    black_rep_winners_prior = mean(black_rep_winner))
+
+# Isolate year 2020
+senate_2020 <- historical_senate %>%
+  filter(year == 2020)
+
+# Merge senate data with winning trends
+senate_2020 <- left_join(senate_2020, senate_averages, by = "state")
+
+# Merge election data with protest data
+senate_protest_2020 <- left_join(senate_2020, senate_protests, by = "state")
+
+# Assign metric NAs to zero
+senate_protest_2020 <- senate_protest_2020 %>%
+    mutate(across(
+    c(size, arrests, injuries_crowd, injuries_police, property_damage, chemical_agents, frequency), ~ case_when(is.na(.x) ~ 0,                                                                              TRUE ~ .x)))
+
+# Add 1 before logging
+senate_protest_2020$log_size <- log(senate_protest_2020$size + 1)
+senate_protest_2020$log_arrests <- log(senate_protest_2020$arrests + 1)
+```
+
+```{r, include=FALSE}
+# Read in data
+house <- read.csv("final: cleaned_house_generals.csv")
+house <- house[, -1]
+    
+house_protests <- read.csv("cleaned_house_protests2.csv")
+house_protests <- house_protests[, -1]
+```
+
+```{r, include=FALSE}
+# Construct pre 2020 variables of interest
+historical_house <- house %>%
+  group_by(state, year, district) %>%
+  summarize(
+    # Create binary outcome values
+    black_winner = as.integer(any(race == "BLACK" & result == "WON")), 
+    black_dem_winner = as.integer(any(race == "BLACK" & result == "WON" & party == "DEMOCRAT")),
+    black_rep_winner = as.integer(any(race == "BLACK" & result == "WON" & party == "REPUBLICAN"))) %>%
+  distinct(state, year, district, .keep_all = TRUE)
+
+# Construct pre-2020 averages
+house_averages <- historical_house %>%
+    filter(year < 2020) %>%
+  group_by(state, district) %>%
+  summarize(
+    # Calculate winning trends
+    black_winners_prior = mean(black_winner),
+    black_dem_winners_prior = mean(black_dem_winner),
+    black_rep_winners_prior = mean(black_rep_winner))
+
+# Isolate year 2020
+house_2020 <- historical_house %>%
+  filter(year == 2020)
+
+# Merge year 2020 with prior year averages
+house_2020 <- left_join(house_2020, house_averages, by = c("state", "district"))
+
+# Merge protest data with election data
+house_protest_2020 <- left_join(house_2020, house_protests, by = c("state", "district"))
+
+# Assign NAs to zero
+house_protest_2020 <- house_protest_2020 %>%
+    mutate(across(
+    c(size, arrests, injuries_crowd, injuries_police, property_damage, chemical_agents, frequency), ~ case_when(is.na(.x) ~ 0,                                                                              TRUE ~ .x)))
+
+# Add 1 before taking log
+house_protest_2020$log_size <- log(house_protest_2020$size + 1)
+house_protest_2020$log_arrests <- log(house_protest_2020$arrests + 1)
+```
+
+```{r, include=FALSE}
+# Load data
+house_primaries <- read.csv("final: cleaned_house_primaries.csv")
+house_primaries <- house_primaries[, -1]
+```
+
+```{r, include=FALSE}
+historical_housep <- house_primaries %>%
+ group_by(state, year, district) %>%
+  # Create binary outcome values
+  summarize(
+    black_winner = as.integer(any(race == "BLACK" & result == "WON")), 
+    black_dem_winner = as.integer(any(race == "BLACK" & result == "WON" & party == "DEMOCRAT")),
+    black_rep_winner = as.integer(any(race == "BLACK" & result == "WON" & party == "REPUBLICAN"))) %>%
+  distinct(state, year, district, .keep_all = TRUE)
+
+housep_averages <- historical_housep %>%
+     filter(year < 2020) %>%
+  group_by(state, district) %>%
+  summarize(
+    black_winners_prior = mean(black_winner),
+    black_dem_winners_prior = mean(black_dem_winner),
+    black_rep_winners_prior = mean(black_rep_winner))
+
+# Isolate year 2020
+housep_2020 <- historical_housep %>%
+  filter(year == 2020)
+
+# Merge election data with electoral trends
+housep_2020 <- left_join(housep_2020, housep_averages, by = c("state", "district"))
+
+# Merge election data with protest data
+housep_protest_2020 <- left_join(housep_2020, house_protests, by = c("state", "district"))
+
+# Set metric NAs to zero
+housep_protest_2020 <- housep_protest_2020 %>%
+    mutate(across(
+    c(size, arrests, injuries_crowd, injuries_police, property_damage, chemical_agents, frequency), ~ case_when(is.na(.x) ~ 0,                                                                              TRUE ~ .x)))
+
+# Add 1 before logging
+housep_protest_2020$log_size <- log(housep_protest_2020$size + 1)
+housep_protest_2020$log_arrests <- log(housep_protest_2020$arrests + 1)
+```
+
+```{r, include=FALSE}
+# Read in data
+county_fips <- read.csv("cleaned_county_fips.csv")
+county_fips <- county_fips[, -1]
+county_protests <- read.csv("cleaned_county_protests2.csv")
+county_protests <- county_protests[, -1]
+
+place_fips <- read.csv("cleaned_place_fips.csv")
+place_fips <- place_fips[, -1]
+city_protests <- read.csv("cleaned_city_protests2.csv") 
+city_protests <- city_protests[, -1]
+```
+
+```{r, include=FALSE}
+historical_county <- county_fips %>%
+  group_by(state, year, fips, office) %>%
+  summarize(
+    # Create binary outcome values
+    black_winner = as.integer(any(race == "black" & winner == "win")),
+    black_dem_winner = as.integer(any(race == "black" & winner == "win" & party == "D")),
+    black_rep_winner = as.integer(any(race == "black" & winner == "win" & party == "R"))) %>%
+  left_join(county_fips %>% select(state, year, fips, office, month), 
+            by = c("state", "year", "fips", "office")) %>%
+ distinct(state, year, fips, office, .keep_all = TRUE) 
+
+  # Filter to 2020 local office candidates organized by county
+  # Filter to elections after George Floyd's death. The only election in May was on the 19th.
+county_2020 <- historical_county %>%
+  filter(year == 2020 & month > 5 | is.na(month))
+
+# Construct electoral success trends
+county_averages <- historical_county %>%
+    filter(year != 2020) %>%
+  group_by(state, office, fips) %>%
+  summarize(
+    black_winners_prior = mean(black_winner),
+    black_dem_winners_prior = mean(black_dem_winner),
+    black_rep_winners_prior = mean(black_rep_winner))
+
+# Merge year 2020 with success averages
+county_2020 <- left_join(county_2020, county_averages, by = c("state", "fips", "office"))
+
+# Merge protest data with election data
+county_protest_2020 <- left_join(county_2020, county_protests, by = c("state", "fips"))
+
+# Assign metric NAs to zero
+county_protest_2020 <- county_protest_2020 %>%
+    mutate(across(
+    c(size, arrests, injuries_crowd, injuries_police, property_damage, chemical_agents, frequency), ~ case_when(is.na(.x) ~ 0,                                                                              TRUE ~ .x)))
+
+# Add 1 before logging
+county_protest_2020$log_size <- log(county_protest_2020$size + 1)
+county_protest_2020$log_arrests <- log(county_protest_2020$arrests + 1)
+```
+
+```{r, include=FALSE}
+historical_place <- place_fips %>%
+  group_by(state, year, locality, office) %>%
+  # Create binary outcome values
+  summarize(
+    black_winner = as.integer(any(race == "black" & winner == "win")),
+     black_dem_winner = as.integer(any(race == "black" & winner == "win" & party == "D")),
+    black_rep_winner = as.integer(any(race == "black" & winner == "win" & party == "R"))) %>%
+  left_join(place_fips %>% select(state, year, locality, office, month), 
+            by = c("state", "year", "locality", "office")) %>%
+ distinct(state, year, locality, office, .keep_all = TRUE) 
+
+
+place_2020 <- historical_place %>%
+  # Filter to 2020 local office candidates organized by county
+  filter(year == 2020) %>%
+# Filter to elections after May, but keep the two elections labeled May that were postponed due to COVID-19
+  filter(is.na(month) | month > 5 | (month == 5 & locality %in% c("round rock", "dekalb")))
+
+place_averages <- historical_place %>%
+    filter(year != 2020) %>%
+  group_by(state, office, locality) %>%
+  # Establish electoral trend
+  summarize(
+    black_winners_prior = mean(black_winner),
+    black_dem_winners_prior = mean(black_dem_winner),
+    black_rep_winners_prior = mean(black_rep_winner))
+
+# Merge year 2020 with electoral averages
+place_2020 <- left_join(place_2020, place_averages, by = c("state", "locality", "office"))
+
+# Merge protest data with election data
+place_protest_2020 <- left_join(place_2020, city_protests, by = c("state", "locality"))
+
+# Assign metric NAs to zero
+place_protest_2020 <- place_protest_2020 %>%
+    mutate(across(
+    c(size, arrests, injuries_crowd, injuries_police, property_damage, chemical_agents, frequency), ~ case_when(is.na(.x) ~ 0,                                                                              TRUE ~ .x)))
+
+# Add 1 before logging
+place_protest_2020$log_size <- log(place_protest_2020$size + 1)
+place_protest_2020$log_arrests <- log(place_protest_2020$arrests + 1)
+```
+
+```{r, include=FALSE}
+# Read in data
+sleg <- read.csv("cleaned_sleg.csv")
+sleg <- sleg[, -1]
+sleg_protests <- read.csv("cleaned_sleg_protests2.csv")
+sleg_protests <- sleg_protests[, -1]
+```
+
+```{r, include=FALSE}
+historical_sleg <- sleg %>%
+  group_by(state, year, dno) %>%
+  # Create binary outcome value
+  summarize(
+    black_winner = as.integer(any(race == "black" & outcome == "won")),
+    black_dem_winner = as.integer(any(race == "black" & outcome == "won" & party == "democrat")),
+    black_rep_winner = as.integer(any(race == "black" & outcome == "won" & party == "republican"))) %>%
+  left_join(sleg %>% select(state, year, dno, month), 
+            by = c("state", "year", "dno")) %>%
+  distinct(state, year, dno, .keep_all = TRUE)
+
+# Establish electoral trends
+sleg_averages <- historical_sleg %>%
+    filter(year < 2020) %>%
+  group_by(state, dno) %>%
+  summarize(
+    black_winners_prior = mean(black_winner),
+    black_dem_winners_prior = mean(black_dem_winner),
+    black_rep_winners_prior = mean(black_rep_winner))
+
+# Isolate year 2020
+sleg_2020 <- historical_sleg %>%
+  filter(year == 2020)
+
+sleg_2020 <- sleg_2020 %>%
+  # Primaries must occur after May 25th (George Floyd) for 2020 data
+  # No primary dates in May past the 25th, so start in June
+  # All generals occur in November
+  filter(month >= 6)
+
+# Merge year 2020 with success averages
+sleg_2020 <- left_join(sleg_2020, sleg_averages, by = c("state", "dno"))
+
+# Merge protest data with election data
+sleg_protest_2020 <- left_join(sleg_2020, sleg_protests, by = "dno")
+
+# Assign metric NAs to zero
+sleg_protest_2020 <- sleg_protest_2020 %>%
+    mutate(across(
+    c(size, arrests, injuries_crowd, injuries_police, property_damage, chemical_agents, frequency), ~ case_when(is.na(.x) ~ 0,                                                                              TRUE ~ .x)))
+
+# Add 1 before taking log
+sleg_protest_2020$log_size <- log(sleg_protest_2020$size + 1)
+sleg_protest_2020$log_arrests <- log(sleg_protest_2020$arrests + 1)
+```
+
+```{r, include=FALSE}
+# Add custom note
+note <- "Standard errors in parentheses. Coefficients represent log-odds changes."
+```
+
+# Senate Results
+
+```{r Senate Stargazers, warning=FALSE, results='asis', echo=FALSE}
+# Build logistic regression models for full dataset
+senate_models <- list(
+  glm(black_winner ~ frequency + black_winners_prior, data = senate_protest_2020, family = binomial),
+  glm(black_winner ~ log_size + black_winners_prior, data = senate_protest_2020, family = binomial),
+  glm(black_winner ~ log_arrests + black_winners_prior, data = senate_protest_2020, family = binomial),
+  glm(black_winner ~ property_damage + black_winners_prior, data = senate_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_crowd + black_winners_prior, data = senate_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_police + black_winners_prior, data = senate_protest_2020, family = binomial),
+  glm(black_winner ~ chemical_agents + black_winners_prior, data = senate_protest_2020, family = binomial))
+
+# Organize into coefficient table
+stargazer(senate_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), header = FALSE, title = "Senate General Elections: Full Dataset", covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Typical Black Success"), dep.var.labels = "Probability of a Black Winner", omit.stat = c("aic", "ll"))
+```
+
+
+# House Generals Results
+
+```{r, warning=FALSE, results='asis', echo=FALSE}
+# Build logistic regression models for full dataset
+house_models <- list(
+  glm(black_winner ~ frequency + black_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_winner ~ log_size + black_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_winner ~ log_arrests + black_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_winner ~ property_damage + black_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_crowd + black_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_police + black_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_winner ~ chemical_agents + black_winners_prior, data = house_protest_2020, family = binomial))
+
+# Organize into coefficient table
+stargazer(house_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), header = FALSE, title = "House General Elections: Full Dataset", covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Prior Black Success"), dep.var.labels = "Probability of a Black Winner", omit.stat = c("aic", "ll"))
+
+# Build logistic regression models for Democrats
+dhouse_models <- list(
+  glm(black_dem_winner ~ frequency + black_dem_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_dem_winner ~ log_size + black_dem_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_dem_winner ~ log_arrests + black_dem_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_dem_winner ~ property_damage + black_dem_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_dem_winner ~ injuries_crowd + black_dem_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_dem_winner ~ injuries_police + black_dem_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_dem_winner ~ chemical_agents + black_dem_winners_prior, data = house_protest_2020, family = binomial))
+
+# Build logistic regression models for Republicans
+rhouse_models <- list(
+  glm(black_rep_winner ~ frequency + black_rep_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_rep_winner ~ log_size + black_rep_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_rep_winner ~ log_arrests + black_rep_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_rep_winner ~ property_damage + black_rep_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_rep_winner ~ injuries_crowd + black_rep_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_rep_winner ~ injuries_police + black_rep_winners_prior, data = house_protest_2020, family = binomial),
+  glm(black_rep_winner ~ chemical_agents + black_rep_winners_prior, data = house_protest_2020, family = binomial))
+
+# Create coefficient tables
+stargazer(dhouse_models, type = "text", star.cutoffs = c(0.05, 0.01, 0.001), header = FALSE, title = "House General Elections: Democratic Party", covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Prior Black Dem Success"), dep.var.labels = "Probability of a Black Democratic Winner", omit.stat = c("aic", "ll"))
+
+# Create coefficient tables
+stargazer(rhouse_models, type = "text", star.cutoffs = c(0.05, 0.01, 0.001), header = FALSE, title = "House General Elections: Republican Party", covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Prior Black Rep Success"), dep.var.labels = "Probability of a Black Republican Winner", omit.stat = c("aic", "ll"))
+```
+
+```{r, include=FALSE}
+# Create summary statistics
+black_cands_house <- house %>%
+  group_by(year) %>%
+  summarize(candidates = sum(race == "BLACK", na.rm = TRUE),
+            winners = sum(race == "BLACK" & result == "WON", na.rm=TRUE),
+            dem_candidates = sum(race == "BLACK" & party == "DEMOCRAT", na.rm = TRUE),
+            dem_winners = sum(race == "BLACK" & result == "WON" & party == "DEMOCRAT", na.rm=TRUE),
+            rep_candidates = sum(race == "BLACK" & party == "REPUBLICAN", na.rm = TRUE),
+            rep_winners = sum(race == "BLACK" & result == "WON" & party == "REPUBLICAN", na.rm=TRUE),
+            total_percent = winners/candidates,
+            d_percent = dem_winners/dem_candidates,
+            r_percent = rep_winners/rep_candidates)
+```
+
+```{r, echo=FALSE}
+# Pivot
+df_long_house <- black_cands_house %>%
+  select(year, d_percent, r_percent) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "percent")
+
+# Graph stats
+ggplot(df_long_house, aes(x = year, y = percent, color = category, group = category)) +
+  geom_line(size = 1.2, show.legend = FALSE) +  
+  geom_point(size = 2.5) +  
+  labs(
+    title = "Black Candidate Success",
+    subtitle = "House General Elections (2012-2020)",
+    x = "Election Year",
+    y = "Winning Percentage",
+    color = "Party") +
+  scale_color_manual(values = custom_colors3,
+                     labels = c("Democrats", "Republicans")) +  
+  scale_x_continuous(breaks = seq(2012, 2020, by = 2)) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  guides(color = guide_legend(override.aes = list(linetype = "blank", shape = 16, size = 6))) +  
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),  
+    panel.background = element_blank(),
+    panel.grid.major = element_line(color = "grey85", size = 0.3),  
+    panel.grid.minor = element_blank(),  
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),  # Tight margins
+    aspect.ratio = 0.5,  # Adjusts the height-to-width ratio (smaller values make it less tall)
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    plot.caption = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, vjust = 0.8, family = "Times New Roman"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.key = element_blank(),
+    legend.background = element_rect(fill = "white", color = NA))
+```
+
+```{r, echo=FALSE}
+# Pivot
+df_long_house <- black_cands_house %>%
+  select(year, dem_candidates, dem_winners, rep_candidates, rep_winners) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "count")
+
+# Only even years
+df_even_years_house <- df_long_house %>%
+  filter(year %% 2 == 0) 
+
+# Plot
+ggplot(df_even_years_house, aes(x = year, y = count, color = category, group = category)) +
+  geom_line(size = 1.2, show.legend = FALSE) +  
+  geom_point(size = 2.5) +  
+  labs(
+    title = "Black Candidates and Winners",
+    subtitle = "House General Elections (2012-2020)",
+    x = "Election Year",
+    y = "Number of Candidates",
+    color = "Party") +
+  scale_color_manual(values = custom_colors6,
+                     labels = c("Dem Candidates", "Dem Winners", "Rep Candidates", "Rep Winners")) +  
+  scale_x_continuous(breaks = seq(2012, 2020)) +
+  scale_y_binned(n.breaks=5, limits = c(0, 100)) +
+  guides(color = guide_legend(override.aes = list(linetype = "blank", shape = 16, size = 6))) +  
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),  
+    panel.background = element_blank(),
+    panel.grid.major = element_line(color = "grey85", size = 0.3),  
+    panel.grid.minor = element_blank(),  
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),  # Tight margins
+    aspect.ratio = 0.5,  # Adjusts the height-to-width ratio (smaller values make it less tall)
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+   axis.text.x = element_text(angle = 45, vjust = 0.8, family = "Times New Roman"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.key = element_blank(),
+    legend.background = element_rect(fill = "white", color = NA))
+```
+
+
+# House primaries results
+
+```{r, results='asis', echo=FALSE}
+# Build logistic regression models for full dataset
+housep_models <- list(
+  glm(black_winner ~ frequency + black_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_winner ~ log_size + black_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_winner ~ log_arrests + black_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_winner ~ property_damage + black_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_crowd + black_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_police + black_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_winner ~ chemical_agents + black_winners_prior, data = housep_protest_2020, family = binomial))
+
+# Make coefficient tables
+stargazer(housep_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), title = "House Primary Elections: Full Dataset", header = FALSE, covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Prior Black Success"), dep.var.labels = "Probability of a Black Winner", omit.stat = c("aic", "ll"))
+
+# Build logistic regression models for Democrats
+dhousep_models <- list(
+  glm(black_dem_winner ~ frequency + black_dem_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_dem_winner ~ log_size + black_dem_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_dem_winner ~ log_arrests + black_dem_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_dem_winner ~ property_damage + black_dem_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_dem_winner ~ injuries_crowd + black_dem_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_dem_winner ~ injuries_police + black_dem_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_dem_winner ~ chemical_agents + black_dem_winners_prior, data = housep_protest_2020, family = binomial))
+
+# Build logistic regression models for Republicans
+rhousep_models <- list(
+  glm(black_rep_winner ~ frequency + black_rep_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_rep_winner ~ log_size + black_rep_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_rep_winner ~ log_arrests + black_rep_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_rep_winner ~ property_damage + black_rep_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_rep_winner ~ injuries_crowd + black_rep_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_rep_winner ~ injuries_police + black_rep_winners_prior, data = housep_protest_2020, family = binomial),
+  glm(black_rep_winner ~ chemical_agents + black_rep_winners_prior, data = housep_protest_2020, family = binomial))
+
+# Create coefficient tables
+stargazer(dhousep_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), header = FALSE, title = "House Primary Elections: Democratic Party", covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Prior Black Dem Success"), dep.var.labels = "Probability of a Black Democratic Winner", omit.stat = c("aic", "ll"))
+
+# Create coefficient tables
+stargazer(rhousep_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), header = FALSE, title = "House Primary Elections: Republican Party", covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Prior Black Rep Success"), dep.var.labels = "Probability of a Black Republican Winner", omit.stat = c("aic", "ll"))
+```
+
+```{r, include=FALSE}
+# Make summary stats
+black_cands_housep <- house_primaries %>%
+  group_by(year) %>%
+    summarize(candidates = sum(race == "BLACK", na.rm = TRUE),
+            winners = sum(race == "BLACK" & result == "WON", na.rm=TRUE),
+            dem_candidates = sum(race == "BLACK" & party == "DEMOCRAT", na.rm = TRUE),
+            dem_winners = sum(race == "BLACK" & result == "WON" & party == "DEMOCRAT", na.rm=TRUE),
+            rep_candidates = sum(race == "BLACK" & party == "REPUBLICAN", na.rm = TRUE),
+            rep_winners = sum(race == "BLACK" & result == "WON" & party == "REPUBLICAN", na.rm=TRUE),
+            total_percent = winners/candidates,
+            d_percent = dem_winners/dem_candidates,
+            r_percent = rep_winners/rep_candidates)
+```
+
+```{r, echo=FALSE}
+# Pivot
+df_long_housep <- black_cands_housep %>%
+  select(year, d_percent, r_percent) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "percent")
+
+# Plot stats
+ggplot(df_long_housep, aes(x = year, y = percent, color = category, group = category)) +
+  geom_line(size = 1.2, show.legend = FALSE) +  
+  geom_point(size = 2.5) +  
+  labs(
+    title = "Black Candidate Success",
+    subtitle = "House Primary Elections (2012-2020)",
+    x = "Election Year",
+    y = "Winning Percentage",
+    color = "Party") +
+  scale_color_manual(values = custom_colors3,
+                     labels = c("Democrats", "Republicans")) +  
+  scale_x_continuous(breaks = seq(2012, 2020, by = 2)) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  guides(color = guide_legend(override.aes = list(linetype = "blank", shape = 16, size = 6))) +  
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),  
+    panel.background = element_blank(),
+    panel.grid.major = element_line(color = "grey85", size = 0.3),  
+    panel.grid.minor = element_blank(),  
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),  # Tight margins
+    aspect.ratio = 0.5,  # Adjusts the height-to-width ratio (smaller values make it less tall)
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+   axis.text.x = element_text(angle = 45, vjust = 0.8, family = "Times New Roman"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.key = element_blank(),
+    legend.background = element_rect(fill = "white", color = NA))
+```
+
+```{r, echo=FALSE}
+# Pivot
+df_long_housep <- black_cands_housep %>%
+  select(year, dem_candidates, dem_winners, rep_candidates, rep_winners) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "count")
+
+# Show even years
+df_even_years_housep <- df_long_housep %>%
+  filter(year %% 2 == 0) 
+
+# Plot stats
+ggplot(df_even_years_housep, aes(x = year, y = count, color = category, group = category)) +
+  geom_line(size = 1.2, show.legend = FALSE) +  
+  geom_point(size = 2.5) +  
+  labs(
+    title = "Black Candidates and Winners",
+    subtitle = "House Primary Elections (2012-2020)",
+    x = "Election Year",
+    y = "Number of Candidates",
+    color = "Party") +
+  scale_color_manual(values = custom_colors6,
+                     labels = c("Dem Candidates", "Dem Winners", "Rep Candidates", "Rep Winners")) +  
+  scale_x_continuous(breaks = seq(2012, 2020)) +
+  scale_y_binned(n.breaks=10, limits = c(0, 140)) +
+  guides(color = guide_legend(override.aes = list(linetype = "blank", shape = 16, size = 6))) +  
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),  
+    panel.background = element_blank(),
+    panel.grid.major = element_line(color = "grey85", size = 0.3),  
+    panel.grid.minor = element_blank(),  
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),  # Tight margins
+    aspect.ratio = 0.5,  # Adjusts the height-to-width ratio (smaller values make it less tall)
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+   axis.text.x = element_text(angle = 45, vjust = 0.8, family = "Times New Roman"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.key = element_blank(),
+    legend.background = element_rect(fill = "white", color = NA))
+```
+
+
+# County results
+
+```{r, results='asis', echo=FALSE}
+# Build logistic regression models for full dataset
+county_models <- list(
+  glm(black_winner ~ frequency + black_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_winner ~ log_size + black_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_winner ~ log_arrests + black_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_winner ~ property_damage + black_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_crowd + black_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_police + black_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_winner ~ chemical_agents + black_winners_prior, data = county_protest_2020, family = binomial))
+
+# Create coefficient tables
+stargazer(county_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), title = "County Elections: Full Dataset", notes = note, header = FALSE, covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Typical Black Success"), dep.var.labels = "Probability of a Black Winner", omit.stat = c("aic", "ll"))
+
+# Create logistic regression models for Democrats
+dcounty_models <- list(
+  glm(black_dem_winner ~ frequency + black_dem_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_dem_winner ~ log_size + black_dem_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_dem_winner ~ log_arrests + black_dem_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_dem_winner ~ property_damage + black_dem_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_dem_winner ~ injuries_crowd + black_dem_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_dem_winner ~ injuries_police + black_dem_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_dem_winner ~ chemical_agents + black_dem_winners_prior, data = county_protest_2020, family = binomial))
+
+# Create logistic regression models for Republicans
+rcounty_models <- list(
+  glm(black_rep_winner ~ frequency + black_rep_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_rep_winner ~ log_size + black_rep_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_rep_winner ~ log_arrests + black_rep_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_rep_winner ~ property_damage + black_rep_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_rep_winner ~ injuries_crowd + black_rep_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_rep_winner ~ injuries_police + black_rep_winners_prior, data = county_protest_2020, family = binomial),
+  glm(black_rep_winner ~ chemical_agents + black_rep_winners_prior, data = county_protest_2020, family = binomial))
+
+# Build coefficient tables
+stargazer(dcounty_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), header = FALSE, title = "County Elections: Democratic Party", covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Typical Black Dem Success"), dep.var.labels = "Probability of a Black Democratic Winner", omit.stat = c("aic", "ll"))
+
+# Build coefficient tables
+stargazer(rcounty_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), header = FALSE, title = "County Elections: Republican Party", covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Typical Black Rep Success"), dep.var.labels = "Probability of a Black Republican Winner", omit.stat = c("aic", "ll"))
+```
+
+```{r, include=FALSE}
+# Create summary stats
+black_cands_county <- county_fips %>%
+  group_by(year) %>%
+    summarize(candidates = sum(race == "black", na.rm = TRUE),
+            winners = sum(race == "black" & winner == "win", na.rm=TRUE),
+            dem_candidates = sum(race == "black" & party == "D", na.rm = TRUE),
+            dem_winners = sum(race == "black" & winner == "win" & party == "D", na.rm=TRUE),
+            rep_candidates = sum(race == "black" & party == "R", na.rm = TRUE),
+            rep_winners = sum(race == "black" & winner == "win" & party == "R", na.rm=TRUE),
+            total_percent = winners/candidates,
+            d_percent = dem_winners/dem_candidates,
+            r_percent = rep_winners/rep_candidates)
+```
+
+```{r, echo=FALSE}
+# Pivot
+df_long_county <- black_cands_county %>%
+  select(year, d_percent, r_percent) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "percent")
+
+# Plot
+ggplot(df_long_county, aes(x = year, y = percent, color = category, group = category)) +
+  geom_line(size = 1.2, show.legend = FALSE) +  
+  geom_point(size = 2.5) +  
+  labs(
+    title = "Black Candidate Success",
+    subtitle = "County Elections (2010-2021)",
+    x = "Election Year",
+    y = "Winning Percentage",
+    color = "Party") +
+  scale_color_manual(values = custom_colors3,
+                     labels = c("Democrats", "Republicans")) +  
+  scale_x_continuous(breaks = seq(2010, 2022)) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  guides(color = guide_legend(override.aes = list(linetype = "blank", shape = 16, size = 6))) +  
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),  
+    panel.background = element_blank(),
+    panel.grid.major = element_line(color = "grey85", size = 0.3),  
+    panel.grid.minor = element_blank(),  
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),  # Tight margins
+    aspect.ratio = 0.5,  # Adjusts the height-to-width ratio (smaller values make it less tall)
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+   axis.text.x = element_text(angle = 45, vjust = 0.8, family = "Times New Roman"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.key = element_blank(),
+    legend.background = element_rect(fill = "white", color = NA))
+```
+
+```{r, echo=FALSE}
+# Pivot
+df_long_county <- black_cands_county %>%
+  select(year, dem_candidates, dem_winners, rep_candidates, rep_winners) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "count")
+
+# Only even years
+df_even_years_county <- df_long_county %>%
+  filter(year %% 2 == 0) 
+
+# Plot
+ggplot(df_even_years_county, aes(x = year, y = count, color = category, group = category)) +
+  geom_line(size = 1.2, show.legend = FALSE) +  
+  geom_point(size = 2.5) +  
+  labs(
+    title = "Black Candidates and Winners",
+    subtitle = "County Elections (2010-2020)",
+    x = "Election Year",
+    y = "Number of Candidates",
+    color = "Party") +
+  scale_color_manual(values = custom_colors6,
+                     labels = c("Dem Candidates", "Dem Winners", "Rep Candidates", "Rep Winners")) +  
+  scale_x_continuous(breaks = seq(2010, 2022)) +
+  scale_y_binned(n.breaks=10, limits = c(0, 300)) +
+  guides(color = guide_legend(override.aes = list(linetype = "blank", shape = 16, size = 6))) +  
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),  
+    panel.background = element_blank(),
+    panel.grid.major = element_line(color = "grey85", size = 0.3),  
+    panel.grid.minor = element_blank(),  
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),  # Tight margins
+    aspect.ratio = 0.5,  # Adjusts the height-to-width ratio (smaller values make it less tall)
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+   axis.text.x = element_text(angle = 45, vjust = 0.8, family = "Times New Roman"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.key = element_blank(),
+    legend.background = element_rect(fill = "white", color = NA))
+```
+
+
+# City results
+
+```{r, results='asis', echo=FALSE}
+# Build logistic regression models for full dataset
+city_models <- list(
+  glm(black_winner ~ frequency + black_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_winner ~ log_size + black_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_winner ~ log_arrests + black_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_winner ~ property_damage + black_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_crowd + black_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_police + black_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_winner ~ chemical_agents + black_winners_prior, data = place_protest_2020, family = binomial))
+
+# Build coefficient tables
+stargazer(city_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), title = "City Elections: Full Dataset", header = FALSE, covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Typical Black Success"), dep.var.labels = "Probability of a Black Winner", omit.stat = c("aic", "ll"))
+
+# Build logistic regression models for Democrats
+dcity_models <- list(
+  glm(black_dem_winner ~ frequency + black_dem_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_dem_winner ~ log_size + black_dem_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_dem_winner ~ log_arrests + black_dem_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_dem_winner ~ property_damage + black_dem_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_dem_winner ~ injuries_crowd + black_dem_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_dem_winner ~ injuries_police + black_dem_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_dem_winner ~ chemical_agents + black_dem_winners_prior, data = place_protest_2020, family = binomial))
+
+# Build logistic regression models for Republicans
+rcity_models <- list(
+  glm(black_rep_winner ~ frequency + black_rep_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_rep_winner ~ log_size + black_rep_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_rep_winner ~ log_arrests + black_rep_winners_prior, data = place_protest_2020, family = binomial),
+  glm(black_rep_winner ~ property_damage + black_rep_winners_prior, data = place_protest_2020, family = binomial))
+
+# Build custom note
+note_r <- "Three predictors excluded for improper fit."
+
+# Build coefficient table
+stargazer(dcity_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), header = FALSE, notes = note, title = "City Elections: Democratic Party", covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Typical Black Dem Success"), dep.var.labels = "Probability of a Black Democratic Winner", omit.stat = c("aic", "ll"))
+
+# Build coefficient table
+stargazer(rcity_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), notes = note_r,header = FALSE, title = "City Elections: Republican Party", covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Typical Black Rep Success"), dep.var.labels = "Proability of a Black Republican Winner", omit.stat = c("aic", "ll"))
+```
+
+```{r, include=FALSE}
+# Summary stats
+black_cands_city <- place_fips %>%
+  group_by(year) %>%
+  summarize(candidates = sum(race == "black", na.rm = TRUE),
+            winners = sum(race == "black" & winner == "win", na.rm=TRUE),
+            dem_candidates = sum(race == "black" & party == "D", na.rm = TRUE),
+            dem_winners = sum(race == "black" & winner == "win" & party == "D", na.rm=TRUE),
+            rep_candidates = sum(race == "black" & party == "R", na.rm = TRUE),
+            rep_winners = sum(race == "black" & winner == "win" & party == "R", na.rm=TRUE),
+            total_percent = winners/candidates,
+            d_percent = dem_winners/dem_candidates,
+            r_percent = rep_winners/rep_candidates)
+```
+
+```{r, echo=FALSE}
+# Pivot
+df_long_city <- black_cands_city %>%
+  select(year, d_percent, r_percent) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "percent")
+
+# Plot
+ggplot(df_long_city, aes(x = year, y = percent, color = category, group = category)) +
+  geom_line(size = 1.2, show.legend = FALSE) +  
+  geom_point(size = 2.5) +  
+  labs(
+    title = "Black Candidate Success",
+    subtitle = "City Elections (2010-2021)",
+    x = "Election Year",
+    y = "Winning Percentage",
+    color = "Party") +
+  scale_color_manual(values = custom_colors3,
+                     labels = c("Democrats", "Republicans")) +  
+  scale_x_continuous(breaks = seq(2010, 2022, by = 2)) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  guides(color = guide_legend(override.aes = list(linetype = "blank", shape = 16, size = 6))) +  
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),  
+    panel.background = element_blank(),
+    panel.grid.major = element_line(color = "grey85", size = 0.3),  
+    panel.grid.minor = element_blank(),  
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),  # Tight margins
+    aspect.ratio = 0.5,  # Adjusts the height-to-width ratio (smaller values make it less tall)
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+   axis.text.x = element_text(angle = 45, vjust = 0.8, family = "Times New Roman"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.key = element_blank(),
+    legend.background = element_rect(fill = "white", color = NA))
+```
+
+```{r, echo=FALSE}
+# Pivot
+df_long_city <- black_cands_city %>%
+  select(year, dem_candidates, dem_winners, rep_candidates, rep_winners) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "count")
+
+# Only even years
+df_even_years_city <- df_long_city %>%
+  filter(year %% 2 == 0) 
+
+# Plot
+ggplot(df_even_years_city, aes(x = year, y = count, color = category, group = category)) +
+  geom_line(size = 1.2, show.legend = FALSE) +  
+  geom_point(size = 2.5) +  
+  labs(
+    title = "Black Candidates and Winners",
+    subtitle = "City Elections (2010-2020)",
+    x = "Election Year",
+    y = "Number of Candidates",
+    color = "Party") +
+  scale_color_manual(values = custom_colors6,
+                     labels = c("Dem Candidates", "Dem Winners", "Rep Candidates", "Rep Winners")) +  
+  scale_x_continuous(breaks = seq(2010, 2022)) +
+  scale_y_binned(n.breaks=10, limits = c(0, 350)) +
+  guides(color = guide_legend(override.aes = list(linetype = "blank", shape = 16, size = 6))) +  
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),  
+    panel.background = element_blank(),
+    panel.grid.major = element_line(color = "grey85", size = 0.3),  
+    panel.grid.minor = element_blank(),  
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),  # Tight margins
+    aspect.ratio = 0.5,  # Adjusts the height-to-width ratio (smaller values make it less tall)
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+   axis.text.x = element_text(angle = 45, vjust = 0.8, family = "Times New Roman"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.key = element_blank(),
+    legend.background = element_rect(fill = "white", color = NA))
+```
+
+
+# Sleg results
+
+```{r wide-table, results = 'asis', echo=FALSE}
+# Build logistic regression models for full dataset
+sleg_models <- list(
+  glm(black_winner ~ frequency + black_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_winner ~ log_size + black_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_winner ~ log_arrests + black_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_winner ~ property_damage + black_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_crowd + black_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_winner ~ injuries_police + black_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_winner ~ chemical_agents + black_winners_prior, data = sleg_protest_2020, family = binomial))
+
+# Coefficient tables
+stargazer(sleg_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), title = "State Legislature Elections: Full Dataset", header = FALSE, covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Prior Black Success"), dep.var.labels = "Probability of a Black Winner", omit.stat = c("aic", "ll"))
+
+# Build logistic regression model for Democrats
+dsleg_models <- list(
+  glm(black_dem_winner ~ frequency + black_dem_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_dem_winner ~ log_size + black_dem_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_dem_winner ~ log_arrests + black_dem_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_dem_winner ~ property_damage + black_dem_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_dem_winner ~ injuries_crowd + black_dem_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_dem_winner ~ injuries_police + black_dem_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_dem_winner ~ chemical_agents + black_dem_winners_prior, data = sleg_protest_2020, family = binomial))
+
+# Build logistic regression model for Republicans
+rsleg_models <- list(
+  glm(black_rep_winner ~ frequency + black_rep_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_rep_winner ~ log_size + black_rep_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_rep_winner ~ log_arrests + black_rep_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_rep_winner ~ property_damage + black_rep_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_rep_winner ~ injuries_crowd + black_rep_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_rep_winner ~ injuries_police + black_rep_winners_prior, data = sleg_protest_2020, family = binomial),
+  glm(black_rep_winner ~ chemical_agents + black_rep_winners_prior, data = sleg_protest_2020, family = binomial))
+
+# Coefficient table
+cat("\\begin{landscape}")
+stargazer(dsleg_models, type = "latex", float.env = "table", star.cutoffs = c(0.05, 0.01, 0.001), title = "State Legislature Elections: Democratic Party", header = FALSE, covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Prior Black Dem Success"), dep.var.labels = "Probability of a Black Democratic Winner", omit.stat = c("aic", "ll"))
+cat("\\end{landscape}")
+
+# Coefficient table
+stargazer(rsleg_models, type = "latex", star.cutoffs = c(0.05, 0.01, 0.001), title = "State Legislature Elections: Republican Party", header = FALSE, notes=note, covariate.labels = c("Frequency", "Size (Log)", "Arrests (Log)", "Property Damage", "Crowd Injuries", "Police Injuries", "Chemical Agents", "Prior Black Rep Success"), dep.var.labels = "Probability of a Black Republican Winner", omit.stat = c("aic", "ll"))
+```
+
+```{r, include=FALSE}
+# Summary stats
+black_cands_sleg <- sleg %>%
+  group_by(year) %>%
+summarize(candidates = sum(race == "black", na.rm = TRUE),
+            winners = sum(race == "black" & outcome == "won", na.rm=TRUE),
+            dem_candidates = sum(race == "black" & party == "democrat", na.rm = TRUE),
+            dem_winners = sum(race == "black" & outcome == "won" & party == "democrat", na.rm=TRUE),
+            rep_candidates = sum(race == "black" & party == "republican", na.rm = TRUE),
+            rep_winners = sum(race == "black" & outcome == "won" & party == "republican", na.rm=TRUE),
+            total_percent = winners/candidates,
+            d_percent = dem_winners/dem_candidates,
+            r_percent = rep_winners/rep_candidates)
+```          
+
+```{r, echo=FALSE}
+# Pivot
+df_long_sleg <- black_cands_sleg %>%
+  select(year, d_percent, r_percent) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "percent")
+
+# Plot
+ggplot(df_long_sleg, aes(x = year, y = percent, color = category, group = category)) +
+  geom_line(size = 1.2, show.legend = FALSE) +  
+  geom_point(size = 2.5) +  
+  labs(
+    title = "Black Candidate Success",
+    subtitle = "State Legislature Elections (2012-2022)",
+    x = "Election Year",
+    y = "Winning Percentage",
+    color = "Party") +
+  scale_color_manual(values = custom_colors3,
+                     labels = c("Democrats", "Republicans")) +  
+  scale_x_continuous(breaks = seq(2012, 2022)) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  guides(color = guide_legend(override.aes = list(linetype = "blank", shape = 16, size = 6))) +  
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),  
+    panel.background = element_blank(),
+    panel.grid.major = element_line(color = "grey85", size = 0.3),  
+    panel.grid.minor = element_blank(),  
+   plot.margin = margin(t = 10, r = 10, b = 10, l = 10),  # Tight margins
+   aspect.ratio = 0.5,  # Adjusts the height-to-width ratio (smaller values make it less tall)
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+   plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.text.x = element_text(angle = 45, vjust = 0.8, family = "Times New Roman"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.key = element_blank(),
+    legend.background = element_rect(fill = "white", color = NA))
+```
+
+```{r, echo=FALSE}
+# Pivot
+df_long_sleg <- black_cands_sleg %>%
+  select(year, dem_candidates, dem_winners, rep_candidates, rep_winners) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "count")
+
+# Only even eyars
+df_even_years_sleg <- df_long_sleg %>%
+  filter(year %% 2 == 0) 
+
+# Plot
+ggplot(df_even_years_sleg, aes(x = year, y = count, color = category, group = category)) +
+  geom_line(size = 1.2, show.legend = FALSE) +  
+  geom_point(size = 2.5) +  
+  labs(
+    title = "Black Candidates and Winners",
+    subtitle = "State Legislature Elections (2012-2022)",
+    x = "Election Year",
+    y = "Number of Candidates",
+    color = "Party") +
+  scale_color_manual(values = custom_colors6,
+                     labels = c("Dem Candidates", "Dem Winners", "Rep Candidates", "Rep Winners")) +  
+  scale_x_continuous(breaks = seq(2012, 2022)) +
+  scale_y_binned(n.breaks=6, limits = c(0, 600)) +
+  guides(color = guide_legend(override.aes = list(linetype = "blank", shape = 16, size = 6))) +  
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),  
+    panel.background = element_blank(),
+    panel.grid.major = element_line(color = "grey85", size = 0.3),  
+    panel.grid.minor = element_blank(),  
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10),  # Tight margins
+    aspect.ratio = 0.5,  # Adjusts the height-to-width ratio (smaller values make it less tall)
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+   axis.text.x = element_text(angle = 45, vjust = 0.8, family = "Times New Roman"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.key = element_blank(),
+    legend.background = element_rect(fill = "white", color = NA))
+```
+
+```{r, include=FALSE}
+protest2 <- read.csv("cleaned_full_protests2.csv")
+protest2$log_size <- log(protest2$size)
+```
+
+```{r, echo=FALSE}
+ggplot(protest2, aes(x = log_size)) +
+  geom_density(color = "#77A88B", size = 1.2) +
+  labs(
+    title = "Logged Protest Size",
+    subtitle = "N = 13,014",
+    x = "Number of Participants Per Protest (Logged)",
+    y = "Proportion of Protests") +
+  theme_bw() +
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(margin = margin(t = 13)),
+    axis.title.y = element_text(margin = margin(r = 13))) +
+    scale_x_continuous(breaks = seq(0, 12, by = 2))
+
+ggplot(senate_protest_2020, aes(x = injuries_crowd)) +
+  geom_density(color = "#77A88B", size = 1.2) +
+   labs(
+    title = "Crowd Injuries Per State with 2020 Senate Elections",
+    subtitle = "N = 34",
+    x = "Number of Crowd Injuries",
+    y = "Proportion of States") +
+  theme_bw() +
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(margin = margin(t = 13)),
+    axis.title.y = element_text(margin = margin(r = 13))) +
+  scale_x_continuous(breaks = seq(0, 40, by = 5))
+
+ggplot(house_protest_2020, aes(x = frequency)) +
+  geom_density(color = "#77A88B", size = 1.2) +
+    labs(
+    title = "Frequency per House District",
+    subtitle = "N = 435",
+    x = "Number of Protests",
+    y = "Proportion of States") +
+  scale_x_continuous(breaks = seq(0, 20, by = 2)) +
+  theme_bw() +
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(margin = margin(t = 13)),
+    axis.title.y = element_text(margin = margin(r = 13)))
+```
+
+```{r, echo=FALSE}
+set.seed(650)
+model <- glm(black_dem_winner ~ log_size + black_dem_winners_prior, 
+             data = house_protest_2020, 
+             family = binomial)
+size_seq <- seq(min(house_protest_2020$log_size, na.rm = TRUE), 
+                    max(house_protest_2020$log_size, na.rm = TRUE), 
+                    length.out = 100)
+mean_black_dem_winners_prior <- mean(house_protest_2020$black_dem_winners_prior, na.rm = TRUE)
+pred_data <- data.frame(log_size = size_seq, 
+                        black_dem_winners_prior = mean_black_dem_winners_prior)
+pred_data$predicted_prob <- predict(model, newdata = pred_data, type = "response")
+
+ggplot(house_protest_2020, aes(x = log_size, y = black_dem_winner)) +
+  geom_jitter(height = 0.05, width = 0.2, alpha = 0.2, color = "#00AEF3") + 
+  geom_line(data = pred_data, aes(x = log_size, y = predicted_prob), 
+            color = "#00AEF3", size = 1) +  
+   labs(title = "Logistic Regression Model",
+    subtitle = "Effect of Size on Black Democrats in House General Elections ",
+    x = "Number of Participants per House District",
+    y = "Probability of Black Dem Win") +
+  #scale_x_continuous(breaks = seq(0, 14, by = 2)) +
+  theme_bw() +
+  theme(
+    text = element_text(family = "Times New Roman", size = 14), 
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(margin = margin(t = 13)),
+    axis.title.y = element_text(margin = margin(r = 13)))
+```
+
+```{r, echo=FALSE}
+model <- glm(black_rep_winner ~ frequency + black_rep_winners_prior, 
+             data = housep_protest_2020, 
+             family = binomial)
+frequency_seq <- seq(min(housep_protest_2020$frequency, na.rm = TRUE), 
+                    max(housep_protest_2020$frequency, na.rm = TRUE), 
+                    length.out = 100)
+mean_black_rep_winners_prior <- mean(housep_protest_2020$black_rep_winners_prior, na.rm = TRUE)
+pred_data <- data.frame(frequency = frequency_seq, 
+                        black_rep_winners_prior = mean_black_rep_winners_prior)
+pred_data$predicted_prob <- predict(model, newdata = pred_data, type = "response")
+
+ggplot(housep_protest_2020, aes(x = frequency, y = black_rep_winner)) +
+  geom_jitter(height = 0.05, width = 0.2, alpha = 0.2, color = "#E81B23") +
+  geom_line(data = pred_data, aes(x = frequency, y = predicted_prob), 
+            color = "#E81B23", size = 1) +  
+  labs(title = "Logistic Regression Model",
+    subtitle = "Effect of Frequency on Black Republicans in House Primary Elections ",
+    x = "Number of Protests per House District",
+    y = "Probability of Black Rep Win") +
+  scale_x_continuous(breaks = seq(0, 20, by = 2)) +
+  theme_bw() +
+  theme(
+    text = element_text(family = "Times New Roman", size = 14), 
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(margin = margin(t = 13)),
+    axis.title.y = element_text(margin = margin(r = 13)))
+```
+
+```{r, echo=FALSE}
+model <- glm(black_winner ~ injuries_crowd + black_winners_prior, 
+             data = place_protest_2020, 
+             family = binomial)
+size_seq <- seq(min(place_protest_2020$injuries_crowd, na.rm = TRUE), 
+                    max(place_protest_2020$injuries_crowd, na.rm = TRUE), 
+                    length.out = 100)
+mean_black_winners_prior <- mean(place_protest_2020$black_winners_prior, na.rm = TRUE)
+pred_data <- data.frame(injuries_crowd = size_seq, 
+                        black_winners_prior = mean_black_winners_prior)
+pred_data$predicted_prob <- predict(model, newdata = pred_data, type = "response")
+
+ggplot(place_protest_2020, aes(x = injuries_crowd, y = black_winner)) +
+  geom_jitter(height = 0.05, width = 0.2, alpha = 0.2, color = "#9E0DF2") +  # Spread overlapping points
+  geom_line(data = pred_data, aes(x = injuries_crowd, y = predicted_prob), 
+            color = "#9E0DF2", size = 1) + 
+  labs(title = "Logistic Regression Model",
+   subtitle = "Effect of Crowd Injuries on Black Candidates in City Elections ",
+    x = "Number of Crowd Injuries per City",
+    y = "Probability of Black Win") +
+  theme_bw() +
+  theme(
+    text = element_text(family = "Times New Roman", size = 14), 
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(margin = margin(t = 13)),
+    axis.title.y = element_text(margin = margin(r = 13))) +
+scale_x_continuous(breaks = seq(0, 100, by = 10))
+```
+
+```{r}
+model3 <- glm(black_dem_winner ~ log_size + black_dem_winners_prior, 
+             data = sleg_protest_2020, 
+             family = binomial)
+marg_effects <- ggpredict(model3, terms = "log_size [all]")
+
+ggplot(marg_effects, aes(x = x, y = predicted)) +
+  geom_line(size = 1.2, color = "#00AEF3") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "#00AEF3") +
+  labs(
+    title = "Predicted Probability of a Black Democratic Winner",
+    subtitle = "State Legislature Elections",
+    x = "Number of Participants per District (Logged)",
+    y = "Predicted Probability") +
+  theme_bw() +
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(margin = margin(t = 13)),
+    axis.title.y = element_text(margin = margin(r = 13))) +
+    scale_x_continuous(breaks = seq(0, 14, by = 2)) +
+    scale_y_continuous(breaks = seq(0, 0.1, by = 0.02))
+
+model4 <- glm(black_rep_winner ~ log_arrests + black_rep_winners_prior, 
+             data = sleg_protest_2020, 
+             family = binomial)
+marg_effects <- ggpredict(model4, terms = "log_arrests [all]")
+
+ggplot(marg_effects, aes(x = x, y = predicted)) +
+  geom_line(size = 1.2, color = "#E81B23") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "#E81B23") +
+  labs(
+    title = "Predicted Probability of a Black Republican Winner",
+    subtitle = "State Legislature Elections",
+    x = "Number of Arrests per District (Logged)",
+    y = "Predicted Probability") +
+  theme_bw() +
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(margin = margin(t = 13)),
+    axis.title.y = element_text(margin = margin(r = 13))) +
+    scale_x_continuous(breaks = seq(0, 8, by = 1)) +
+    scale_y_continuous(breaks = seq(0, 0.1, by = 0.005))
+
+model5 <- glm(black_winner ~ frequency + black_winners_prior, 
+             data = house_protest_2020, 
+             family = binomial)
+marg_effects <- ggpredict(model5, terms = "frequency [all]")
+
+ggplot(marg_effects, aes(x = x, y = predicted)) +
+  geom_line(size = 1.2, color = "#9E0DF2") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "#9E0DF2") +
+  labs(
+    title = "Predicted Probability of a Black Winner",
+    subtitle = "House General Elections",
+    x = "Number of Protests per District",
+    y = "Predicted Probability") +
+  theme_bw() +
+  theme(
+    text = element_text(family = "Times New Roman", size = 14),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+    plot.subtitle = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(margin = margin(t = 13)),
+    axis.title.y = element_text(margin = margin(r = 13))) +
+    scale_x_continuous(breaks = seq(0, 20, by = 2))
+```
+
+
+
